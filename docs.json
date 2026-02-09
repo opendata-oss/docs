@@ -11,12 +11,120 @@
   "navigation": {
     "tabs": [
       {
-        "tab": "Documentation",
+        "tab": "Overview",
         "groups": [
           {
             "group": "Getting started",
             "pages": [
-              "index"
+              "index",
+              "overview/quickstart"
+            ]
+          },
+          {
+            "group": "Foundation",
+            "pages": [
+              "overview/architecture",
+              "overview/slatedb"
+            ]
+          },
+          {
+            "group": "Community",
+            "pages": [
+              "overview/contributing",
+              "overview/roadmap"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "TimeSeries",
+        "groups": [
+          {
+            "group": "Getting started",
+            "pages": [
+              "timeseries/index",
+              "timeseries/quickstart"
+            ]
+          },
+          {
+            "group": "Usage",
+            "pages": [
+              "timeseries/configuration",
+              "timeseries/querying"
+            ]
+          },
+          {
+            "group": "Design",
+            "pages": [
+              "timeseries/storage-design"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "Log",
+        "groups": [
+          {
+            "group": "Getting started",
+            "pages": [
+              "log/index",
+              "log/quickstart"
+            ]
+          },
+          {
+            "group": "Usage",
+            "pages": [
+              "log/writing",
+              "log/reading"
+            ]
+          },
+          {
+            "group": "Design",
+            "pages": [
+              "log/storage-design"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "Vector",
+        "groups": [
+          {
+            "group": "Getting started",
+            "pages": [
+              "vector/index",
+              "vector/quickstart"
+            ]
+          },
+          {
+            "group": "Usage",
+            "pages": [
+              "vector/indexing",
+              "vector/querying"
+            ]
+          },
+          {
+            "group": "Design",
+            "pages": [
+              "vector/storage-design"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "Key-Value",
+        "groups": [
+          {
+            "group": "Getting started",
+            "pages": [
+              "keyvalue/index",
+              "keyvalue/quickstart"
+            ]
+          },
+          {
+            "group": "Usage",
+            "pages": [
+              "keyvalue/api"
             ]
           }
         ]
@@ -29,7 +137,7 @@
   },
   "footer": {
     "socials": {
-      "github": "https://github.com/opendata",
+      "github": "https://github.com/opendata-oss/opendata",
       "discord": "https://discord.gg/CsAQJ2AJGU"
     }
   }
