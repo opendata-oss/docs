@@ -15,6 +15,26 @@ pre, code {
   font-family: 'JetBrains Mono', monospace !important;
 }
 
+.navbar-link .truncate {
+  display: none;
+}
+
+.navbar-link + .navbar-link,
+.navbar-link + li {
+  --tw-space-x-reverse: 0;
+  margin-left: 4px !important;
+}
+
+.navbar-link a {
+  border: 1px solid #d4d4d4;
+  border-radius: 9999px;
+  padding: 4px 10px;
+}
+
+.dark .navbar-link a {
+  border-color: #525252;
+}
+
 pre.ascii-art {
   font-family: 'JetBrains Mono Full', monospace !important;
   font-variant-ligatures: none !important;

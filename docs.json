@@ -130,6 +130,18 @@
     "light": "/logo/light.svg",
     "dark": "/logo/dark.svg"
   },
+  "navbar": {
+    "links": [
+      {
+        "type": "discord",
+        "href": "https://discord.gg/CsAQJ2AJGU"
+      },
+      {
+        "type": "github",
+        "href": "https://github.com/opendata-oss/opendata"
+      }
+    ]
+  },
   "css": "/global.css",
   "footer": {
     "socials": {
