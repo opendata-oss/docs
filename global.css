@@ -1,0 +1,25 @@
+@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&display=swap');
+
+@font-face {
+  font-family: 'JetBrains Mono Full';
+  src: url('/fonts/JetBrainsMono.woff2') format('woff2');
+  font-weight: 400;
+  font-display: swap;
+}
+
+:root {
+  --background: oklch(97% 0 0);
+}
+
+pre, code {
+  font-family: 'JetBrains Mono', monospace !important;
+}
+
+pre.ascii-art {
+  font-family: 'JetBrains Mono Full', monospace !important;
+  font-variant-ligatures: none !important;
+  line-height: 1.32 !important;
+  font-size: 0.8125rem;
+  overflow-x: auto;
+  letter-spacing: 0;
+}

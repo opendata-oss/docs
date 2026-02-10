@@ -1,4 +1,78 @@
 ---
-title: Welcome to OpenData
+title: Overview
 description: Open-source databases on a shared, object-native storage foundation
 ---
+
+<pre className="ascii-art">{`
+┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
+┃▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒ opendata overview ▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒┃
+┣━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┫
+┃                                                                ┃
+┃   ╔timeseries══╗                            ╔vector══════╗     ┃
+┃   ║ ┌────────┐ ║▒                           ║ ┌────────┐ ║▒    ┃
+┃   ║ │slateDB │ ║──────────────┬─────────────║ │slateDB │ ║▒    ┃
+┃   ║ └────────┘ ║▒             ▼             ║ └────────┘ ║▒    ┃
+┃   ╚════════════╝▒      ╔════════════╗       ╚════════════╝▒    ┃
+┃    ▒▒▒▒▒▒▒▒▒▒▒▒▒▒      ║            ║▒       ▒▒▒▒▒▒▒▒▒▒▒▒▒▒    ┃
+┃                        ║   Object   ║▒                         ┃
+┃                        ║   Storage  ║▒                         ┃
+┃                        ║            ║▒                         ┃
+┃                        ╚════════════╝▒                         ┃
+┃   ╔log═════════╗        ▒▒▒▒▒▒▲▒▒▒▒▒▒▒      ╔key-value═══╗     ┃
+┃   ║ ┌────────┐ ║▒             │             ║ ┌────────┐ ║▒    ┃
+┃   ║ │slateDB │ ║──────────────┴─────────────║ │slateDB │ ║▒    ┃
+┃   ║ └────────┘ ║▒                           ║ └────────┘ ║▒    ┃
+┃   ╚════════════╝▒                           ╚════════════╝▒    ┃
+┃    ▒▒▒▒▒▒▒▒▒▒▒▒▒▒                            ▒▒▒▒▒▒▒▒▒▒▒▒▒▒    ┃
+┃                                                                ┃
+┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛
+`}</pre>
+
+OpenData is a collection of open source databases that share a unified storage foundation on object storage. One storage engine, one operational model, four databases (and counting): timeseries, log, vector, and key-value.
+
+## Why OpenData
+
+Database software is largely commoditized. Postgres, MySQL, Redis, and their derivatives are free to run. But the real cost of operating databases isn't the software, it's the expertise required to keep them running: replication, failover, backup, capacity planning, and disaster recovery. These concerns dominate the total cost of ownership and are reimplemented, differently, for every database engine.
+
+Object storage changes the equation. Services like S3 provide durability, replication, and availability at commodity prices with zero operational overhead. When you push replication and durability down to the storage layer, the database itself becomes dramatically simpler. Entire categories of complexity disappear:
+
+- **Consensus protocols** — S3 handles replication; no need for Raft or Paxos
+- **Replica management** — no followers to provision, monitor, or promote
+- **Backup systems** — object storage is the source of truth; nothing extra to snapshot
+- **Storage capacity planning** — object storage scales elastically and indefinitely
+
+OpenData takes this further by sharing a single storage engine ([SlateDB](https://slatedb.io)) and a common set of tooling across all four databases. Learn one operational model, run four databases.
+
+## The databases
+
+<CardGroup cols={2}>
+  <Card title="Timeseries" icon="chart-line" href="/timeseries">
+    Prometheus-compatible metrics database built on object storage.
+  </Card>
+  <Card title="Log" icon="scroll" href="/log">
+    Key-oriented event streaming built on an LSM tree.
+  </Card>
+  <Card title="Vector" icon="brain" href="/vector">
+    SPANN-style approximate nearest neighbor search on object storage.
+  </Card>
+  <Card title="Key-Value" icon="key" href="/keyvalue">
+    Simple, low-latency key-value storage built on SlateDB.
+  </Card>
+</CardGroup>
+
+## Learn more
+
+<CardGroup cols={2}>
+  <Card title="Quickstart" icon="rocket" href="/overview/quickstart">
+    Get OpenData running locally in under five minutes.
+  </Card>
+  <Card title="Architecture" icon="sitemap" href="/overview/architecture">
+    Understand how the shared storage foundation works.
+  </Card>
+  <Card title="SlateDB" icon="database" href="/overview/slatedb">
+    Learn about the embedded LSM engine that powers OpenData.
+  </Card>
+  <Card title="Contributing" icon="code-pull-request" href="/overview/contributing">
+    Find out how to contribute to the project.
+  </Card>
+</CardGroup>

@@ -3,9 +3,9 @@
   "theme": "mint",
   "name": "OpenData",
   "colors": {
-    "primary": "#16A34A",
-    "light": "#07C983",
-    "dark": "#15803D"
+    "primary": "#525252",
+    "light": "#A3A3A3",
+    "dark": "#262626"
   },
   "favicon": "/favicon.svg",
   "navigation": {
@@ -14,15 +14,10 @@
         "tab": "Overview",
         "groups": [
           {
-            "group": "Getting started",
+            "group": "Introduction",
             "pages": [
               "index",
-              "overview/quickstart"
-            ]
-          },
-          {
-            "group": "Foundation",
-            "pages": [
+              "overview/quickstart",
               "overview/architecture",
               "overview/slatedb"
             ]
@@ -37,7 +32,7 @@
         ]
       },
       {
-        "tab": "TimeSeries",
+        "tab": "Timeseries",
         "groups": [
           {
             "group": "Getting started",
@@ -135,6 +130,7 @@
     "light": "/logo/light.svg",
     "dark": "/logo/dark.svg"
   },
+  "css": "/global.css",
   "footer": {
     "socials": {
       "github": "https://github.com/opendata-oss/opendata",
