@@ -1,0 +1,81 @@
+---
+title: Reading Data
+---
+
+Reading data from OpenData databases heavily leverages data caches to avoid
+unnecessary `GET` API calls to object storage.
+
+<pre className="ascii-art">{`
+┌─────────────────────────────────────────────────────────────────────┐
+│▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒ opendata read path ▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒│
+├─────────────────────────────────────────────────────────────────────┤
+│                                                                     │
+│                 ╔═ ══ ══ ═╗      ╔═════════╗      ╔═════════╗       │
+│                                  ║         ║▒     ║         ║▒      │
+│ ╔══════════╗    ║In-Memory║      ║In-Memory║▒     ║  NVMe   ║▒      │
+│ ║read(data)║───▶║  Delta  ║─────▶║  Cache  ║─────▶║  Cache  ║▒      │
+│ ╚══════════╝                     ║         ║▒     ║         ║▒      │
+│                 ╚═ ══ ══ ═╝      ╚═════════╝▒     ╚═════════╝▒      │
+│                                   ▒▒▒▒▒▒▒▒▒▒▒      ▒▒▒▒│▒▒▒▒▒▒      │
+│                                       ┌────────────────┘            │
+│                                       │                             │
+│                                       ▼                             │
+│                  ╔═════════════════════════════════════════╗        │
+│                  ║                                         ║▒       │
+│                  ║             Object Storage              ║▒       │
+│                  ║                                         ║▒       │
+│                  ╚═════════════════════════════════════════╝▒       │
+│                   ▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒       │
+│                                                                     │
+└─────────────────────────────────────────────────────────────────────┘
+`}</pre>
+
+Reading data relies on a combination of domain-specific logic as well
+as shared storage access primitives. Each database implements its own
+indexes and data layouts for optimal read performance, but all use
+SlateDB queries to access the data through multiple levels of caches.
+
+### Multiple Reader Architecture
+
+The benefit of this architecture is that while performance depends on
+warm caches, data is always available for reads even without the cache
+by accessing it directly from object storage. This is particularly useful
+property for scaling out read workloads: adding a new read partition does
+not require any coordination with the main writer or other readers. Other
+readers' caches will eventually drain as queries for that subset of data
+are no longer served while the new reader's cache will warm up as it serves
+queries. This architecture also enables zonal reads, which can help reduce
+latency and intra-zone data transfers.
+
+<pre className="ascii-art">{`
+┌──────────────────────────────────────────────────────────────────────────────┐
+│▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒ multi-reader setup ▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒│
+├──────────────────────────────────────────────────────────────────────────────┤
+│                                                                              │
+│   ╔Zone A══════════════╗    ╔══════════════════╗    ╔Zone B══════════════╗   │
+│   ║                    ║▒   ║                  ║▒   ║                    ║▒  │
+│   ║  ┌──────────────┐  ║▒   ║                  ║▒   ║  ┌──────────────┐  ║▒  │
+│   ║  │   Reader A   ◀──╬────╣                  ╠────╬──▶   Reader B   │  ║▒  │
+│   ║  │ (Range A-Z)  │  ║▒   ║                  ║▒   ║  │ (Range A-L)  │  ║▒  │
+│   ║  └──────────────┘  ║▒   ║                  ║▒   ║  └──────────────┘  ║▒  │
+│   ║                    ║▒   ║      Object      ║▒   ║                    ║▒  │
+│   ║                    ║▒   ║     Storage      ║▒   ║                    ║▒  │
+│   ║  ┌──────────────┐  ║▒   ║                  ║▒   ║  ┌──────────────┐  ║▒  │
+│   ║  │              │  ║▒   ║                  ║▒   ║  │   Reader C   │  ║▒  │
+│   ║  │ Main Writer  │──╬────▶                  ╠────╬──▶ (Range M-Z)  │  ║▒  │
+│   ║  │              │  ║▒   ║                  ║▒   ║  └──────────────┘  ║▒  │
+│   ║  └──────────────┘  ║▒   ║                  ║▒   ║                    ║▒  │
+│   ╚════════════════════╝▒   ╚══════════════════╝▒   ╚════════════════════╝▒  │
+│    ▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒    ▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒    ▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒  │
+│                                                                              │
+└──────────────────────────────────────────────────────────────────────────────┘
+`}</pre>
+
+### Checkpoints & Backups
+
+The nature of designing a system as an immutable LSM tree on top of object
+storage means that checkpointing data and/or creating backups is trivial.
+A single, O(1) metadata operation records the current state of the database
+and marks the files as immune from garbage collection. This checkpointed state
+can be retained for as long as desired and used to restore the database to
+a previous state, or to create a branch for testing or debugging.

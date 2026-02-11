@@ -1,0 +1,121 @@
+---
+title: Writing Data
+---
+
+The OpenData family of databases share a common foundation to provide a unified
+experience and similar operational characteristics. Nearly all the databases
+share a similar read/write path.
+
+The write path accepts data and writes it both to a durable WAL as well as into
+in-memory data structures that are eventually flushed to object storage as
+SSTs in an LSM tree:
+
+<pre className="ascii-art">{`
+┌─────────────────────────────────────────────────────────────────────┐
+│▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒ opendata write path ▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒│
+├─────────────────────────────────────────────────────────────────────┤
+│                                                                     │
+│                                                                     │
+│                            ╔═════════╗       ╔SlateDB══════════╗    │
+│                            ║         ║▒      ║                 ║▒   │
+│                       ┌───▶║   WAL   ║▒      ║                 ║▒   │
+│                       │    ║         ║▒      ║                 ║▒   │
+│                       │    ╚═════════╝▒      ║  ┌───────────┐  ║▒   │
+│  ╔═══════════════╗    │     ▒▒▒▒▒▒▒▒▒▒▒      ║  │ LSM Tree  │  ║▒   │
+│  ║  write(data)  ║────┤                      ║  │ on Object │  ║▒   │
+│  ╚═══════════════╝    │                      ║  │  Storage  │  ║▒   │
+│                       │    ╔═════════╗       ║  └───────────┘  ║▒   │
+│                       │    ║         ║▒      ║                 ║▒   │
+│                       └───▶║  Delta  ║──────▶║                 ║▒   │
+│                            ║         ║▒      ║                 ║▒   │
+│                            ╚═════════╝▒      ╚═════════════════╝▒   │
+│                             ▒▒▒▒▒▒▒▒▒▒▒       ▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒   │
+│                                                                     │
+└─────────────────────────────────────────────────────────────────────┘
+`}</pre>
+
+Writes are assigned a canonical ordering before being acknowledged to ensure
+that data is written consistently. From there, small WAL (write-ahead log)
+files are created and flushed frequently to object storage to ensure durability
+within a configurable time delay. These files are used to recover the database
+in the event of a system failure.
+
+Simultaneously, data is written into an in-memory data structure we call a
+`Delta`. This is used to make new data immediately available for reads. Once
+the `Delta` is full, it is flushed to object storage as a SlateDB SST. While
+the `Delta` implementation is domain-specific (unique to each database), the
+management mechanism is common across all databases, ensuring that the ingest
+semantics are correct and well tested.
+
+<Note>
+  LSM Tree maintence tasks such as comapction and garbage collection are handled
+  asynchronously and can run on a separate runtime (or even on a different
+  machine). While each database can implement its own comapction strategy, we
+  delegate the compaction execution to SlateDB.
+
+  See [Compaction in SlateDB](https://slatedb.io/rfcs/0002-compaction/).
+</Note>
+
+### Single Writer Architecture
+
+The OpenData family of databases are designed to operate as single-writer systems
+for each partition of the data. Writer failover and fencing of old writers is
+handled by the object storage compare-and-set mechanism. These mechanisms ensure
+that data written to OpenData databases are strongly consistent as soon as the
+data is durable.
+
+### Stateless High-Availability Zonal Ingestion
+
+Databases that don't required read-your-write consistency can ingest data from
+stateless services deployed in each availability zone. This allows for both
+high-availability ingest and avoids cross-zone data transfers. For example,
+ingesting metrics into `timeseries` without stateless zonal ingestion would
+require a remote write to the single-writer deployed in a particular zone.
+If the single-writer is down, the metric write request will fail.  With
+stateless zonal ingestion, the metrics are ingested directly into S3 from within
+the region they are produced and then transferred to the single writer over S3.
+This both avoids the cross-zone data transfer costs and only depends on the
+availability of S3.
+
+<pre className="ascii-art">{`
+┌─────────────────────────────────────────────────────────────────────┐
+│▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒ stateless zonal ingestion ▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒│
+├─────────────────────────────────────────────────────────────────────┤
+│                                                                     │
+│      ╔Zone A══════════════════════╗     ╔Zone B══════════╗          │
+│      ║ ┌──────────┐  ┌──────────┐ ║▒    ║  ┌──────────┐  ║▒         │
+│      ║ │   app    │  │   app    │ ║▒    ║  │   app    │  ║▒         │
+│      ║ └───┬──────┘  └──────┬───┘ ║▒    ║  └─────┬────┘  ║▒         │
+│      ║     │                │     ║▒    ║        │       ║▒         │
+│      ║     │  ┌──────────┐  │     ║▒    ║  ┌─────▼────┐  ║▒         │
+│      ║     └─▶│ ingestor │◀─┘     ║▒    ║  │ ingestor │  ║▒         │
+│      ║        └──────────┘        ║▒    ║  └──────────┘  ║▒         │
+│      ╚══════════════╦═════════════╝▒    ╚════════╦═══════╝▒         │
+│       ▒▒▒▒▒▒▒▒▒▒▒▒▒▒│▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒     ▒▒▒▒▒▒▒▒│▒▒▒▒▒▒▒▒▒         │
+│                     └───────────┬────────────────┘                  │
+│                                 │                                   │
+│                                 ▼                                   │
+│       ╔═══════════════════════════════════════════════════╗         │
+│       ║                                                   ║▒        │
+│       ║                  Object Storage                   ║▒        │
+│       ║                                                   ║▒        │
+│       ╚═════════════════════════╦═════════════════════════╝▒        │
+│        ▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒│▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒        │
+│                                 │                                   │
+│                                 │                                   │
+│                  ╔Zone C════════╬═════════════╗                     │
+│                  ║       ┌──────▼──────┐      ║▒                    │
+│                  ║       │ main writer │      ║▒                    │
+│                  ║       └─────────────┘      ║▒                    │
+│                  ╚════════════════════════════╝▒                    │
+│                   ▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒                    │
+│                                                                     │
+└─────────────────────────────────────────────────────────────────────┘
+`}</pre>
+
+### Flexible Durability Guarantees
+
+The common write coordination mechanism allows users to control the required
+durability before acknowledging the write. This allows users to trade off
+durability for write latency. This tradeoff is fundamental to the design of
+object-store native systems.

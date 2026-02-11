@@ -14,12 +14,13 @@
         "tab": "Overview",
         "groups": [
           {
-            "group": "Introduction",
+            "group": "Concepts",
             "pages": [
               "index",
-              "overview/quickstart",
-              "overview/architecture",
-              "overview/slatedb"
+              "overview/writing-data",
+              "overview/reading-data",
+              "overview/storage",
+              "overview/tradeoffs"
             ]
           },
           {
