@@ -27,7 +27,18 @@
           "timeseries/index",
           "timeseries/quickstart",
           "timeseries/configuration",
-          "timeseries/querying",
+          {
+            "group": "API reference",
+            "openapi": "openapi/timeseries.yaml",
+            "pages": [
+              "GET /api/v1/query",
+              "GET /api/v1/query_range",
+              "GET /api/v1/series",
+              "GET /api/v1/labels",
+              "GET /api/v1/label/{name}/values",
+              "POST /api/v1/write"
+            ]
+          },
           "timeseries/storage-design"
         ]
       },

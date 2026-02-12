@@ -1,0 +1,673 @@
+openapi: 3.1.0
+info:
+  title: OpenData Timeseries API
+  version: 1.0.0
+  description: |
+    Prometheus-compatible HTTP API for the OpenData Timeseries service.
+
+    Query endpoints accept both GET (query parameters) and POST
+    (application/x-www-form-urlencoded body) with identical parameters.
+    This spec documents the GET form; POST is always available as an
+    alternative for large queries.
+
+servers:
+  - url: http://localhost:9090
+    description: Local development server
+
+paths:
+  /api/v1/query:
+    get:
+      operationId: instantQuery
+      summary: Instant query
+      description: |
+        Evaluate a PromQL expression at a single point in time.
+
+        If `time` is omitted the server uses the current time.
+        Also accepts POST with a `application/x-www-form-urlencoded` body
+        containing the same parameters.
+      parameters:
+        - name: query
+          in: query
+          required: true
+          description: PromQL expression to evaluate.
+          schema:
+            type: string
+          example: up{job="node"}
+        - name: time
+          in: query
+          required: false
+          description: |
+            Evaluation timestamp. Accepts RFC 3339 (e.g. `2024-01-20T00:00:00Z`)
+            or Unix seconds (e.g. `1705708800`). Defaults to current server time.
+          schema:
+            type: string
+        - name: timeout
+          in: query
+          required: false
+          description: |
+            Evaluation timeout. Duration string such as `30s`, `1m`, or `2h`.
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Query result.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/QueryResponse"
+              example:
+                status: success
+                data:
+                  resultType: vector
+                  result:
+                    - metric:
+                        __name__: up
+                        job: node
+                      value:
+                        - 1705708800
+                        - "1"
+        "400":
+          description: Invalid query or parameters.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "503":
+          description: Service unavailable (backpressure).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /api/v1/query_range:
+    get:
+      operationId: rangeQuery
+      summary: Range query
+      description: |
+        Evaluate a PromQL expression over a range of time, returning a matrix
+        of time series with regularly spaced samples.
+
+        Also accepts POST with a `application/x-www-form-urlencoded` body
+        containing the same parameters.
+      parameters:
+        - name: query
+          in: query
+          required: true
+          description: PromQL expression to evaluate.
+          schema:
+            type: string
+          example: rate(http_requests_total[5m])
+        - name: start
+          in: query
+          required: true
+          description: |
+            Start timestamp (inclusive). RFC 3339 or Unix seconds.
+          schema:
+            type: string
+          example: "2024-01-20T00:00:00Z"
+        - name: end
+          in: query
+          required: true
+          description: |
+            End timestamp (inclusive). RFC 3339 or Unix seconds.
+          schema:
+            type: string
+          example: "2024-01-20T01:00:00Z"
+        - name: step
+          in: query
+          required: true
+          description: |
+            Query resolution step width. Duration string such as `15s`, `1m`.
+          schema:
+            type: string
+          example: "15s"
+        - name: timeout
+          in: query
+          required: false
+          description: |
+            Evaluation timeout. Duration string such as `30s`, `1m`, or `2h`.
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Range query result (matrix).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/QueryRangeResponse"
+              example:
+                status: success
+                data:
+                  resultType: matrix
+                  result:
+                    - metric:
+                        __name__: http_requests_total
+                        method: GET
+                      values:
+                        - - 1705708800
+                          - "10"
+                        - - 1705708815
+                          - "12"
+        "400":
+          description: Invalid query or parameters.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "503":
+          description: Service unavailable (backpressure).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /api/v1/series:
+    get:
+      operationId: listSeries
+      summary: List series
+      description: |
+        Return the list of label sets that match a set of series selectors.
+
+        Also accepts POST with a `application/x-www-form-urlencoded` body
+        containing the same parameters.
+      parameters:
+        - name: match[]
+          in: query
+          required: false
+          description: |
+            Repeated series selector. At least one `match[]` argument must be
+            provided (e.g. `match[]=up&match[]=process_start_time_seconds{job="node"}`).
+          schema:
+            type: array
+            items:
+              type: string
+          style: form
+          explode: true
+          example: up{job="node"}
+        - name: start
+          in: query
+          required: false
+          description: Start timestamp. RFC 3339 or Unix seconds.
+          schema:
+            type: string
+        - name: end
+          in: query
+          required: false
+          description: End timestamp. RFC 3339 or Unix seconds.
+          schema:
+            type: string
+        - name: limit
+          in: query
+          required: false
+          description: Maximum number of series to return.
+          schema:
+            type: integer
+            minimum: 0
+      responses:
+        "200":
+          description: Matching label sets.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SeriesResponse"
+              example:
+                status: success
+                data:
+                  - __name__: up
+                    job: node
+                    instance: localhost:9100
+        "400":
+          description: Invalid parameters.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "503":
+          description: Service unavailable (backpressure).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /api/v1/labels:
+    get:
+      operationId: listLabels
+      summary: List label names
+      description: |
+        Return the list of label names. Optionally filtered by series selectors
+        and a time range.
+      parameters:
+        - name: match[]
+          in: query
+          required: false
+          description: |
+            Optional series selectors to filter which label names are returned.
+          schema:
+            type: array
+            items:
+              type: string
+          style: form
+          explode: true
+        - name: start
+          in: query
+          required: false
+          description: Start timestamp. RFC 3339 or Unix seconds.
+          schema:
+            type: string
+        - name: end
+          in: query
+          required: false
+          description: End timestamp. RFC 3339 or Unix seconds.
+          schema:
+            type: string
+        - name: limit
+          in: query
+          required: false
+          description: Maximum number of label names to return.
+          schema:
+            type: integer
+            minimum: 0
+      responses:
+        "200":
+          description: List of label names.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LabelsResponse"
+              example:
+                status: success
+                data:
+                  - __name__
+                  - instance
+                  - job
+        "400":
+          description: Invalid parameters.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "503":
+          description: Service unavailable (backpressure).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /api/v1/label/{name}/values:
+    get:
+      operationId: listLabelValues
+      summary: List label values
+      description: |
+        Return the list of values for a given label name. Optionally filtered
+        by series selectors and a time range.
+      parameters:
+        - name: name
+          in: path
+          required: true
+          description: The label name to retrieve values for.
+          schema:
+            type: string
+          example: job
+        - name: match[]
+          in: query
+          required: false
+          description: |
+            Optional series selectors to filter which label values are returned.
+          schema:
+            type: array
+            items:
+              type: string
+          style: form
+          explode: true
+        - name: start
+          in: query
+          required: false
+          description: Start timestamp. RFC 3339 or Unix seconds.
+          schema:
+            type: string
+        - name: end
+          in: query
+          required: false
+          description: End timestamp. RFC 3339 or Unix seconds.
+          schema:
+            type: string
+        - name: limit
+          in: query
+          required: false
+          description: Maximum number of label values to return.
+          schema:
+            type: integer
+            minimum: 0
+      responses:
+        "200":
+          description: List of label values.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LabelValuesResponse"
+              example:
+                status: success
+                data:
+                  - node
+                  - prometheus
+        "400":
+          description: Invalid parameters.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "503":
+          description: Service unavailable (backpressure).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /api/v1/write:
+    post:
+      operationId: remoteWrite
+      summary: Remote write
+      description: |
+        Ingest time series data using the
+        [Prometheus Remote Write 1.0](https://prometheus.io/docs/specs/prw/remote_write_spec/)
+        protocol.
+
+        The request body must be a **Snappy-compressed** protobuf `WriteRequest`
+        message. This endpoint is only available when the server is built with
+        the `remote-write` feature.
+      parameters:
+        - name: Content-Type
+          in: header
+          required: true
+          description: Must be `application/x-protobuf`.
+          schema:
+            type: string
+            enum:
+              - application/x-protobuf
+        - name: Content-Encoding
+          in: header
+          required: true
+          description: Must be `snappy`.
+          schema:
+            type: string
+            enum:
+              - snappy
+      requestBody:
+        required: true
+        content:
+          application/x-protobuf:
+            schema:
+              type: string
+              format: binary
+              description: Snappy-compressed protobuf `WriteRequest` message.
+      responses:
+        "204":
+          description: Samples ingested successfully (empty body).
+        "400":
+          description: Invalid request (wrong content type, decompression failure, or protobuf decode error).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "503":
+          description: Service unavailable (backpressure).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+components:
+  schemas:
+    QueryResponse:
+      type: object
+      description: Response for an instant query (`/api/v1/query`).
+      properties:
+        status:
+          type: string
+          enum:
+            - success
+            - error
+        data:
+          $ref: "#/components/schemas/QueryResult"
+        error:
+          type: string
+          description: Error message (present when status is `error`).
+        errorType:
+          type: string
+          description: Error category (present when status is `error`).
+      required:
+        - status
+
+    QueryResult:
+      type: object
+      description: |
+        Result payload for an instant query. The `resultType` indicates the
+        shape of `result`: `vector`, `scalar`, `matrix`, or `string`.
+      properties:
+        resultType:
+          type: string
+          enum:
+            - vector
+            - scalar
+            - matrix
+            - string
+        result:
+          description: |
+            Query result. Shape depends on `resultType`:
+            - **vector**: array of `{ metric, value }` objects
+            - **matrix**: array of `{ metric, values }` objects
+            - **scalar**: `[timestamp, "value"]` tuple
+            - **string**: `[timestamp, "string"]` tuple
+      required:
+        - resultType
+        - result
+
+    QueryRangeResponse:
+      type: object
+      description: Response for a range query (`/api/v1/query_range`).
+      properties:
+        status:
+          type: string
+          enum:
+            - success
+            - error
+        data:
+          $ref: "#/components/schemas/QueryRangeResult"
+        error:
+          type: string
+          description: Error message (present when status is `error`).
+        errorType:
+          type: string
+          description: Error category (present when status is `error`).
+      required:
+        - status
+
+    QueryRangeResult:
+      type: object
+      description: "Result payload for a range query (always `resultType: matrix`)."
+      properties:
+        resultType:
+          type: string
+          enum:
+            - matrix
+        result:
+          type: array
+          items:
+            $ref: "#/components/schemas/MatrixSeries"
+      required:
+        - resultType
+        - result
+
+    MatrixSeries:
+      type: object
+      description: A single time series in a matrix result.
+      properties:
+        metric:
+          type: object
+          additionalProperties:
+            type: string
+          description: Label set identifying the series.
+        values:
+          type: array
+          items:
+            type: array
+            prefixItems:
+              - type: number
+                description: Unix timestamp (seconds).
+              - type: string
+                description: Sample value as a string.
+            minItems: 2
+            maxItems: 2
+          description: Array of `[timestamp, value]` pairs.
+      required:
+        - metric
+        - values
+
+    VectorSeries:
+      type: object
+      description: A single instant-vector sample.
+      properties:
+        metric:
+          type: object
+          additionalProperties:
+            type: string
+          description: Label set identifying the series.
+        value:
+          type: array
+          prefixItems:
+            - type: number
+              description: Unix timestamp (seconds).
+            - type: string
+              description: Sample value as a string.
+          minItems: 2
+          maxItems: 2
+          description: A `[timestamp, value]` pair.
+      required:
+        - metric
+        - value
+
+    SeriesResponse:
+      type: object
+      description: Response for the series listing endpoint (`/api/v1/series`).
+      properties:
+        status:
+          type: string
+          enum:
+            - success
+            - error
+        data:
+          type: array
+          items:
+            type: object
+            additionalProperties:
+              type: string
+          description: Array of label sets, one per matching series.
+        error:
+          type: string
+        errorType:
+          type: string
+      required:
+        - status
+
+    LabelsResponse:
+      type: object
+      description: Response for the label names endpoint (`/api/v1/labels`).
+      properties:
+        status:
+          type: string
+          enum:
+            - success
+            - error
+        data:
+          type: array
+          items:
+            type: string
+          description: Sorted list of label names.
+        error:
+          type: string
+        errorType:
+          type: string
+      required:
+        - status
+
+    LabelValuesResponse:
+      type: object
+      description: Response for the label values endpoint (`/api/v1/label/{name}/values`).
+      properties:
+        status:
+          type: string
+          enum:
+            - success
+            - error
+        data:
+          type: array
+          items:
+            type: string
+          description: Sorted list of values for the given label.
+        error:
+          type: string
+        errorType:
+          type: string
+      required:
+        - status
+
+    ErrorResponse:
+      type: object
+      description: |
+        Prometheus-compatible error response. Returned for all error cases.
+      properties:
+        status:
+          type: string
+          example: error
+        errorType:
+          type: string
+          description: |
+            Error category: `bad_data` (400), `internal` (500), or
+            `unavailable` (503).
+          enum:
+            - bad_data
+            - internal
+            - unavailable
+        error:
+          type: string
+          description: Human-readable error message.
+      required:
+        - status
+        - errorType
+        - error
