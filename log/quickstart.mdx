@@ -1,4 +1,123 @@
 ---
 title: Quickstart
-description: Append and read events with the Log Rust API
+description: Install Log locally and append your first events in minutes
 ---
+
+Get an append-only event log running on your machine in under five minutes.
+You will install Log, start the server, append events, and read them back
+using curl.
+
+## Install OpenData Log
+
+Download and install the Log binary:
+
+```bash
+curl https://www.opendata.dev/install.sh | sh
+```
+
+This places the `opendata-log` binary in the current directory.
+
+## Start the server
+
+Start Log on port 8081:
+
+```bash
+./opendata-log --port 8081
+```
+
+No configuration file is needed — all options are passed as CLI flags. Data is
+stored in `.data/` by default.
+
+## Append records
+
+Append three order events to the `orders` key. Keys and values are
+base64-encoded in the JSON body:
+
+```bash
+curl -X POST http://localhost:8081/api/v1/log/append \
+  -H "Content-Type: application/json" \
+  -d '{
+    "records": [
+      {
+        "key": { "value": "b3JkZXJz" },
+        "value": "eyJpdGVtIjoid2lkZ2V0IiwicXR5IjozLCJwcmljZSI6OS45OX0="
+      },
+      {
+        "key": { "value": "b3JkZXJz" },
+        "value": "eyJpdGVtIjoiZ2FkZ2V0IiwicXR5IjoxLCJwcmljZSI6MjQuOTV9"
+      },
+      {
+        "key": { "value": "b3JkZXJz" },
+        "value": "eyJpdGVtIjoid2lkZ2V0IiwicXR5IjoxMCwicHJpY2UiOjkuOTl9"
+      }
+    ]
+  }'
+```
+
+The key and values decode to:
+
+| Base64 | Plain text |
+| --- | --- |
+| `b3JkZXJz` | `orders` |
+| `eyJpdGVtIjoid2lkZ2V0IiwicXR5IjozLCJwcmljZSI6OS45OX0=` | `{"item":"widget","qty":3,"price":9.99}` |
+| `eyJpdGVtIjoiZ2FkZ2V0IiwicXR5IjoxLCJwcmljZSI6MjQuOTV9` | `{"item":"gadget","qty":1,"price":24.95}` |
+| `eyJpdGVtIjoid2lkZ2V0IiwicXR5IjoxMCwicHJpY2UiOjkuOTl9` | `{"item":"widget","qty":10,"price":9.99}` |
+
+The server responds with the starting sequence number and how many records were
+written:
+
+```json
+{
+  "status": "success",
+  "recordsAppended": 3,
+  "startSequence": 0
+}
+```
+
+## Read records back
+
+Scan all entries for the `orders` key:
+
+```bash
+curl "http://localhost:8081/api/v1/log/scan?key=orders"
+```
+
+The response includes each entry's global sequence number and its base64-encoded
+value:
+
+```json
+{
+  "status": "success",
+  "key": { "value": "b3JkZXJz" },
+  "values": [
+    { "sequence": 0, "value": "eyJpdGVtIjoid2lkZ2V0IiwicXR5IjozLCJwcmljZSI6OS45OX0=" },
+    { "sequence": 1, "value": "eyJpdGVtIjoiZ2FkZ2V0IiwicXR5IjoxLCJwcmljZSI6MjQuOTV9" },
+    { "sequence": 2, "value": "eyJpdGVtIjoid2lkZ2V0IiwicXR5IjoxMCwicHJpY2UiOjkuOTl9" }
+  ]
+}
+```
+
+Add `limit` to paginate through large result sets:
+
+```bash
+curl "http://localhost:8081/api/v1/log/scan?key=orders&limit=1"
+```
+
+## Explore more endpoints
+
+List all keys in the log:
+
+```bash
+curl "http://localhost:8081/api/v1/log/keys"
+```
+
+List storage segments:
+
+```bash
+curl "http://localhost:8081/api/v1/log/segments"
+```
+
+## Next steps
+
+- Explore the full API in the **API reference** section in the sidebar.
+- Learn how segments and compaction work in [Storage design](/log/storage-design).
