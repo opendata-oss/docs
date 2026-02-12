@@ -37,8 +37,17 @@
         "pages": [
           "log/index",
           "log/quickstart",
-          "log/writing",
-          "log/reading",
+          {
+            "group": "API reference",
+            "openapi": "openapi/log.yaml",
+            "pages": [
+              "POST /api/v1/log/append",
+              "GET /api/v1/log/scan",
+              "GET /api/v1/log/keys",
+              "GET /api/v1/log/segments",
+              "GET /api/v1/log/count"
+            ]
+          },
           "log/storage-design"
         ]
       },

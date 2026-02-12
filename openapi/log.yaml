@@ -1,0 +1,463 @@
+openapi: 3.1.0
+info:
+  title: OpenData Log API
+  version: 1.0.0
+  description: HTTP API for the OpenData Log service — an append-only, key-partitioned log.
+
+servers:
+  - url: http://localhost:3001
+    description: Local development server
+
+paths:
+  /api/v1/log/append:
+    post:
+      operationId: append
+      summary: Append records
+      description: |
+        Append one or more records to the log. Each record has an optional key
+        (used for partitioning scans) and a value (arbitrary bytes, base64-encoded
+        in JSON).
+
+        Set `awaitDurable` to `true` to block until the records are persisted to
+        durable storage. When `false` (the default), the server acknowledges the
+        write as soon as records are buffered in memory.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AppendRequest"
+            example:
+              records:
+                - key:
+                    value: "dGVzdC1rZXk="
+                  value: "dGVzdC12YWx1ZQ=="
+              awaitDurable: false
+      responses:
+        "200":
+          description: Records appended successfully.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AppendResponse"
+              example:
+                status: success
+                recordsAppended: 1
+                startSequence: 42
+        "400":
+          description: Invalid input (malformed JSON or missing fields).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /api/v1/log/scan:
+    get:
+      operationId: scan
+      summary: Scan entries
+      description: |
+        Scan log entries for a given key within an optional sequence range.
+
+        Supports **long-polling**: set `follow=true` to hold the connection open
+        until new data arrives or `timeout_ms` elapses (default 30 000 ms). This
+        is useful for tailing a log stream in near-real-time.
+      parameters:
+        - name: key
+          in: query
+          required: true
+          description: Key to scan (URL-encoded if it contains special characters).
+          schema:
+            type: string
+        - name: start_seq
+          in: query
+          required: false
+          description: Start sequence number (inclusive). Defaults to `0`.
+          schema:
+            type: integer
+            format: uint64
+            minimum: 0
+        - name: end_seq
+          in: query
+          required: false
+          description: End sequence number (exclusive). Defaults to `max uint64`.
+          schema:
+            type: integer
+            format: uint64
+            minimum: 0
+        - name: limit
+          in: query
+          required: false
+          description: Maximum number of entries to return.
+          schema:
+            type: integer
+            minimum: 0
+        - name: follow
+          in: query
+          required: false
+          description: If `true`, long-poll until data is available or timeout.
+          schema:
+            type: boolean
+        - name: timeout_ms
+          in: query
+          required: false
+          description: Timeout in milliseconds for long-polling. Default `30000`.
+          schema:
+            type: integer
+            format: uint64
+            minimum: 0
+      responses:
+        "200":
+          description: Scan results.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ScanResponse"
+              example:
+                status: success
+                key:
+                  value: "dGVzdC1rZXk="
+                values:
+                  - sequence: 42
+                    value: "dGVzdC12YWx1ZQ=="
+        "400":
+          description: Invalid input (e.g. missing `key` parameter).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /api/v1/log/keys:
+    get:
+      operationId: listKeys
+      summary: List keys
+      description: |
+        List distinct keys present in the log within an optional segment range.
+      parameters:
+        - name: start_segment
+          in: query
+          required: false
+          description: Start segment ID (inclusive). Defaults to `0`.
+          schema:
+            type: integer
+            format: uint32
+            minimum: 0
+        - name: end_segment
+          in: query
+          required: false
+          description: End segment ID (exclusive). Defaults to `max uint32`.
+          schema:
+            type: integer
+            format: uint32
+            minimum: 0
+        - name: limit
+          in: query
+          required: false
+          description: Maximum number of keys to return.
+          schema:
+            type: integer
+            minimum: 0
+      responses:
+        "200":
+          description: List of keys.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/KeysResponse"
+              example:
+                status: success
+                keys:
+                  - value: "ZXZlbnRz"
+                  - value: "b3JkZXJz"
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /api/v1/log/segments:
+    get:
+      operationId: listSegments
+      summary: List segments
+      description: |
+        List log segments whose start sequence falls within the given range.
+        Segments are the physical storage units of the log.
+      parameters:
+        - name: start_seq
+          in: query
+          required: false
+          description: Start sequence number (inclusive). Defaults to `0`.
+          schema:
+            type: integer
+            format: uint64
+            minimum: 0
+        - name: end_seq
+          in: query
+          required: false
+          description: End sequence number (exclusive). Defaults to `max uint64`.
+          schema:
+            type: integer
+            format: uint64
+            minimum: 0
+      responses:
+        "200":
+          description: List of segments.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SegmentsResponse"
+              example:
+                status: success
+                segments:
+                  - id: 0
+                    startSeq: 0
+                    startTimeMs: 1705766400000
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /api/v1/log/count:
+    get:
+      operationId: count
+      summary: Count entries
+      description: |
+        Count the number of log entries for a given key within an optional
+        sequence range.
+      parameters:
+        - name: key
+          in: query
+          required: true
+          description: Key to count (URL-encoded if it contains special characters).
+          schema:
+            type: string
+        - name: start_seq
+          in: query
+          required: false
+          description: Start sequence number (inclusive). Defaults to `0`.
+          schema:
+            type: integer
+            format: uint64
+            minimum: 0
+        - name: end_seq
+          in: query
+          required: false
+          description: End sequence number (exclusive). Defaults to `max uint64`.
+          schema:
+            type: integer
+            format: uint64
+            minimum: 0
+      responses:
+        "200":
+          description: Entry count.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CountResponse"
+              example:
+                status: success
+                count: 1024
+        "400":
+          description: Invalid input (e.g. missing `key` parameter).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+components:
+  schemas:
+    Key:
+      type: object
+      description: Wrapper around a byte-string key (base64-encoded in JSON).
+      properties:
+        value:
+          type: string
+          format: byte
+          description: The key bytes, base64-encoded.
+      required:
+        - value
+
+    Record:
+      type: object
+      description: A single log record containing an optional key and a value.
+      properties:
+        key:
+          $ref: "#/components/schemas/Key"
+          description: Optional partition key.
+        value:
+          type: string
+          format: byte
+          description: Record payload, base64-encoded.
+      required:
+        - value
+
+    AppendRequest:
+      type: object
+      description: Request body for appending records to the log.
+      properties:
+        records:
+          type: array
+          items:
+            $ref: "#/components/schemas/Record"
+          description: One or more records to append.
+        awaitDurable:
+          type: boolean
+          default: false
+          description: Whether to wait for durable persistence before responding.
+      required:
+        - records
+
+    AppendResponse:
+      type: object
+      description: Response after successfully appending records.
+      properties:
+        status:
+          type: string
+          example: success
+        recordsAppended:
+          type: integer
+          format: int32
+          description: Number of records written.
+        startSequence:
+          type: integer
+          format: uint64
+          description: Sequence number assigned to the first appended record.
+      required:
+        - status
+        - recordsAppended
+        - startSequence
+
+    Value:
+      type: object
+      description: A single log entry returned by scan.
+      properties:
+        sequence:
+          type: integer
+          format: uint64
+          description: Global sequence number of this entry.
+        value:
+          type: string
+          format: byte
+          description: Entry payload, base64-encoded.
+      required:
+        - sequence
+        - value
+
+    ScanResponse:
+      type: object
+      description: Response containing scanned log entries for a key.
+      properties:
+        status:
+          type: string
+          example: success
+        key:
+          $ref: "#/components/schemas/Key"
+          description: The key that was scanned.
+        values:
+          type: array
+          items:
+            $ref: "#/components/schemas/Value"
+          description: Matching log entries.
+      required:
+        - status
+        - values
+
+    Segment:
+      type: object
+      description: Metadata for a log segment (physical storage unit).
+      properties:
+        id:
+          type: integer
+          format: uint32
+          description: Segment ID.
+        startSeq:
+          type: integer
+          format: uint64
+          description: First sequence number in this segment.
+        startTimeMs:
+          type: integer
+          format: int64
+          description: Wall-clock timestamp (ms since epoch) when the segment was created.
+      required:
+        - id
+        - startSeq
+        - startTimeMs
+
+    SegmentsResponse:
+      type: object
+      description: Response listing log segments.
+      properties:
+        status:
+          type: string
+          example: success
+        segments:
+          type: array
+          items:
+            $ref: "#/components/schemas/Segment"
+      required:
+        - status
+        - segments
+
+    KeysResponse:
+      type: object
+      description: Response listing distinct keys in the log.
+      properties:
+        status:
+          type: string
+          example: success
+        keys:
+          type: array
+          items:
+            $ref: "#/components/schemas/Key"
+      required:
+        - status
+        - keys
+
+    CountResponse:
+      type: object
+      description: Response containing the count of entries for a key.
+      properties:
+        status:
+          type: string
+          example: success
+        count:
+          type: integer
+          format: uint64
+          description: Number of entries matching the query.
+      required:
+        - status
+        - count
+
+    ErrorResponse:
+      type: object
+      description: Error response returned for all error cases.
+      properties:
+        status:
+          type: string
+          example: error
+        message:
+          type: string
+          description: Human-readable error message.
+      required:
+        - status
+        - message
