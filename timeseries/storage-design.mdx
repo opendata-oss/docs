@@ -2,3 +2,131 @@
 title: Storage design
 description: How Timeseries organizes data in time buckets on SlateDB
 ---
+
+Timeseries stores all data as key-value records in SlateDB. Data is organized
+into time buckets with inverted indexes for efficient label-based querying, a
+forward index for resolving series metadata, and Gorilla-compressed storage for
+time series samples.
+
+<Note>
+  This page covers the conceptual storage model. For exact byte-level encoding
+  schemas, see the
+  [storage RFC on GitHub](https://github.com/opendata-oss/opendata/blob/main/timeseries/rfcs/0001-tsdb-storage.md).
+</Note>
+
+## Storage components
+
+Timeseries has three storage components that work together to serve queries:
+
+| Component | Purpose |
+| --- | --- |
+| **Raw series storage** | Stores `(timestamp, value)` pairs keyed by series ID |
+| **Inverted index** | Maps label/value pairs to series IDs for efficient label matching |
+| **Forward index** | Maps series IDs back to their full label sets |
+
+### How a query uses the storage components
+
+To illustrate how these components interact, consider the query
+`sum by (instance) (metric{path="/query", method="GET", status="200"})`:
+
+1. Parse the query into a query plan.
+2. Look up each label selector in the inverted index
+   (`__name__="metric"`, `path="/query"`, `method="GET"`, `status="200"`)
+   to find matching series IDs. Intersect the results.
+3. Resolve each matched series ID to its full label set in the forward index
+   (including `instance`, needed for the `by (instance)` grouping).
+4. Read the `(timestamp, value)` pairs for each matched series in the raw series storage
+   matched series, aggregate, and return the result.
+
+## Time buckets
+
+Data is divided into time buckets, where each bucket holds all data
+received within a specific window of time. The bucket boundary is encoded
+directly into every record key, which means SlateDB physically clusters
+records from the same time window together on disk.
+
+This design provides two key benefits:
+
+- **Efficient range scans**: queries that target recent data only scan the
+  relevant buckets without reading historical data.
+- **Scoped cardinality**: series IDs are local to a time bucket, so
+  cardinality is bounded by the number of series in each bucket rather than
+  growing unboundedly over time.
+
+The initial implementation uses **1-hour buckets**. As buckets age, they will
+eventually be rolled up into coarser granularities (e.g. daily or weekly)
+through compaction, replacing the original fine-grained buckets.
+
+## Record types
+
+All records share a common key prefix that encodes a version byte and a
+record tag. The record tag identifies the record type and, for bucket-scoped
+records, the time granularity. This allows different record types and bucket
+sizes to coexist in the same keyspace while maintaining clean sort ordering.
+
+| Record type | Scope | Description |
+| --- | --- | --- |
+| **BucketList** | Global | Enumerates the time buckets that contain data, including each bucket's granularity |
+| **SeriesDictionary** | Bucket | Maps label-set fingerprints to series IDs, used during ingestion to assign or look up IDs |
+| **ForwardIndex** | Bucket | Stores the full label set for each series ID, used during query execution to resolve labels |
+| **InvertedIndex** | Bucket | Maps each label/value pair to a [RoaringBitmap](https://roaringbitmap.org/) of series IDs (the posting list) |
+| **TimeSeries** | Bucket | Holds the Gorilla-compressed `(timestamp, value)` stream for each series |
+
+### Inverted index
+
+The inverted index is the primary mechanism for label-based queries. For every
+label/value pair on a series, the index stores a posting list of all series IDs
+that share that pair. For example, if series 713 has labels `job="api"` and
+`status="500"`, then both posting lists include series 713.
+
+Posting lists are stored as [RoaringBitmaps](https://roaringbitmap.org/),
+which provide efficient compression and fast set operations (intersection,
+union) for combining multiple label selectors.
+
+The metric name (`__name__`) is treated as a regular label rather than a
+first-class key prefix. This gives the query planner flexibility to choose the
+most selective label to scan first. For example, sometimes filtering by
+`cluster="prod"` is more efficient than filtering by metric name.
+
+### Forward index
+
+The forward index maps each series ID back to its canonical label set. After
+the inverted index identifies matching series, the forward index resolves each
+one to its full set of labels. This is necessary for operations like `by` and
+`without` grouping, which need labels that weren't part of the original
+selector.
+
+The forward index also stores metric metadata: the metric type
+(gauge, sum, histogram, exponential histogram, summary), temporality, and
+the monotonic flag.
+
+### Time series storage and compression
+
+Raw time series data is stored as Gorilla-compressed streams of `(timestamp,
+value)` pairs. [Gorilla
+compression](https://www.vldb.org/pvldb/vol8/p1816-teller.pdf) exploits the
+temporal locality of time series data to achieve high compression ratios.  This
+works by encoding timestamps using delta-of-delta encoding and values using XOR
+compression.
+
+## Metric type handling
+
+Following the Prometheus approach, all OpenTelemetry metric types are
+normalized to `f64` values:
+
+- **Gauges and counters** are stored directly as `(timestamp, value)` pairs.
+- **Histograms** are decomposed into multiple series using Prometheus naming
+  conventions:
+  - `metric_bucket{le="<upper>"}` for each bucket boundary (cumulative counts,
+    with a final `le="+Inf"` bucket)
+  - `metric_sum` for the sum of all observations
+  - `metric_count` for the total number of observations
+
+  Delta histograms from OpenTelemetry are accumulated into cumulative form so
+  the resulting series are monotonically increasing, matching Prometheus
+  semantics.
+
+This mapping mirrors the
+[OTLP-to-Prometheus translation](https://github.com/open-telemetry/opentelemetry-collector/blob/main/translator/prometheus/README.md#otlp-to-prometheus)
+used by the OpenTelemetry Collector, ensuring compatibility with Grafana,
+PromQL, and other Prometheus-native tooling.

@@ -2,3 +2,217 @@
 title: Configuration
 description: Configure scrape targets, storage backends, and retention for Timeseries
 ---
+
+Timeseries is configured through CLI arguments and a Prometheus-compatible YAML
+configuration file. The CLI arguments control server startup, while the YAML
+file defines scrape targets, storage backends, and operational parameters.
+
+## CLI Arguments
+
+Pass these flags when starting the `opendata-timeseries` binary.
+
+| Flag | Environment Variable | Default | Description |
+| --- | --- | --- | --- |
+| `-c`, `--config` | `PROMETHEUS_CONFIG_FILE` | _none_ | Path to the `prometheus.yaml` configuration file |
+| `-p`, `--port` | `OPEN_TSDB_PORT` | `9090` | Port to listen on |
+
+```bash
+./opendata-timeseries --config prometheus.yaml --port 9090
+```
+
+## Configuration File
+
+The configuration file follows the Prometheus YAML format with additional
+sections for storage. The generic placeholders used in this reference are:
+
+- `<string>`: a regular string
+- `<int>`: an integer value
+- `<duration>`: a duration matching `[0-9]+(ms|s|m|h|d)` (e.g. `30s`, `1m`, `2h`)
+
+A value enclosed in `[ ]` is optional. The default value is shown after `| default =`.
+
+```yaml
+# Default settings applied to all scrape jobs.
+global:
+  # How often to scrape targets.
+  [ scrape_interval: <duration> | default = 15s ]
+
+# List of scrape job configurations.
+scrape_configs:
+  [ - <scrape_config> ... ]
+
+# Storage backend configuration (required).
+storage:
+  <storage_config>
+
+# How often (in seconds) to flush data from memory to durable storage.
+[ flush_interval_secs: <int> | default = 5 ]
+```
+
+### `<scrape_config>`
+
+Each scrape config defines a set of targets and the parameters for scraping them.
+
+```yaml
+# Name for this scrape job. Added as the `job` label on all scraped metrics.
+job_name: <string>
+
+# Override the global scrape interval for this job.
+[ scrape_interval: <duration> | default = <global.scrape_interval> ]
+
+# List of static target groups to scrape.
+static_configs:
+  [ - <static_config> ... ]
+```
+
+### `<static_config>`
+
+A static config defines a list of targets and a common set of labels to apply.
+
+```yaml
+# Endpoints to scrape in host:port format.
+targets:
+  [ - <string> ... ]
+
+# Labels to attach to all metrics scraped from these targets.
+labels:
+  [ <string>: <string> ... ]
+```
+
+### `<storage_config>`
+
+Storage is tagged by `type`.
+
+```yaml
+# The storage backend type.
+type: <string> # One of: InMemory, SlateDb
+```
+
+<Tabs>
+  <Tab title="InMemory">
+    Stores data in memory only. Data is lost on restart. Useful for testing
+    and development. No additional fields are required.
+
+    ```yaml
+    storage:
+      type: InMemory
+    ```
+  </Tab>
+  <Tab title="SlateDb">
+    Persists data to an object store via [SlateDB](https://slatedb.io).
+
+    ```yaml
+    storage:
+      type: SlateDb
+
+      # Path prefix for SlateDB data within the object store.
+      [ path: <string> | default = "data" ]
+
+      # Path to a SlateDB settings file (TOML/YAML/JSON).
+      # If omitted, SlateDB checks for SlateDb.toml, SlateDb.json, or SlateDb.yaml
+      # in the working directory and merges any SLATEDB_-prefixed environment variables.
+      [ settings_path: <string> ]
+
+      # Object store provider configuration (required).
+      object_store:
+        <object_store_config>
+    ```
+  </Tab>
+</Tabs>
+
+### `<object_store_config>`
+
+The object store is tagged by `type`.
+
+<Tabs>
+  <Tab title="Local filesystem">
+    ```yaml
+    object_store:
+      type: Local
+      # Directory path for local storage.
+      path: <string>
+    ```
+  </Tab>
+  <Tab title="AWS S3">
+    ```yaml
+    object_store:
+      type: Aws
+      # AWS region (e.g. us-west-2).
+      region: <string>
+      # S3 bucket name.
+      bucket: <string>
+    ```
+  </Tab>
+  <Tab title="In-memory">
+    ```yaml
+    object_store:
+      type: InMemory
+    ```
+  </Tab>
+</Tabs>
+
+## Examples
+
+<Tabs>
+  <Tab title="Local development">
+    ```yaml prometheus.yaml
+    global:
+      scrape_interval: 15s
+
+    scrape_configs:
+      - job_name: "my-app"
+        static_configs:
+          - targets: ["localhost:9090"]
+
+    storage:
+      type: SlateDb
+      path: data
+      object_store:
+        type: Local
+        path: ./data
+
+    flush_interval_secs: 5
+    ```
+  </Tab>
+  <Tab title="Production (S3)">
+    ```yaml prometheus.yaml
+    global:
+      scrape_interval: 30s
+
+    scrape_configs:
+      - job_name: "node-exporter"
+        scrape_interval: 15s
+        static_configs:
+          - targets: ["host-a:9100", "host-b:9100"]
+            labels:
+              env: production
+      - job_name: "api-server"
+        static_configs:
+          - targets: ["api-1:8080", "api-2:8080"]
+            labels:
+              env: production
+
+    storage:
+      type: SlateDb
+      path: data
+      object_store:
+        type: Aws
+        region: us-west-2
+        bucket: my-metrics-bucket
+    ```
+  </Tab>
+  <Tab title="Testing (in-memory)">
+    ```yaml prometheus.yaml
+    global:
+      scrape_interval: 5s
+
+    scrape_configs:
+      - job_name: "test-app"
+        static_configs:
+          - targets: ["localhost:9090"]
+
+    storage:
+      type: InMemory
+    ```
+  </Tab>
+</Tabs>

@@ -27,6 +27,7 @@
         "pages": [
           "timeseries/index",
           "timeseries/quickstart",
+          "timeseries/storage-design",
           "timeseries/configuration",
           {
             "group": "API reference",
@@ -39,8 +40,7 @@
               "GET /api/v1/label/{name}/values",
               "POST /api/v1/write"
             ]
-          },
-          "timeseries/storage-design"
+          }
         ]
       },
       {
@@ -49,6 +49,7 @@
         "pages": [
           "log/index",
           "log/quickstart",
+          "log/storage-design",
           {
             "group": "API reference",
             "openapi": "openapi/log.yaml",
@@ -59,8 +60,7 @@
               "GET /api/v1/log/segments",
               "GET /api/v1/log/count"
             ]
-          },
-          "log/storage-design"
+          }
         ]
       },
       {
