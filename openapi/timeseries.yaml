@@ -8,7 +8,43 @@ info:
     Query endpoints accept both GET (query parameters) and POST
     (application/x-www-form-urlencoded body) with identical parameters.
     This spec documents the GET form; POST is always available as an
-    alternative for large queries.
+    alternative for large queries that may exceed URL character limits.
+
+    ## Timestamp formats
+
+    All timestamp parameters accept either **RFC 3339** format
+    (e.g. `2024-01-20T00:00:00Z`) or **Unix seconds** as a float
+    (e.g. `1705708800` or `1705708800.123`). Timestamps in responses are
+    always Unix seconds.
+
+    ## Duration format
+
+    Duration parameters use PromQL duration syntax: an integer followed by a
+    unit suffix. Supported units are `ms` (milliseconds), `s` (seconds),
+    `m` (minutes), `h` (hours), `d` (days), `w` (weeks), and `y` (years).
+    Examples: `30s`, `5m`, `1h30m`.
+
+    ## Sample values
+
+    Sample values are always transferred as JSON strings (not numbers) to
+    allow special values such as `"NaN"`, `"+Inf"`, and `"-Inf"`.
+
+    ## Response envelope
+
+    Every JSON response follows a common envelope:
+    ```json
+    {
+      "status": "success" | "error",
+      "data": <payload>,
+      "errorType": "<string>",
+      "error": "<string>",
+      "warnings": ["<string>"]
+    }
+    ```
+    The `error` and `errorType` fields are only present when `status` is
+    `"error"`. The `warnings` array may be present on successful responses
+    when the query engine has non-fatal issues to report (e.g. partial
+    results due to unavailable shards).
 
 servers:
   - url: http://localhost:9090
@@ -22,14 +58,23 @@ paths:
       description: |
         Evaluate a PromQL expression at a single point in time.
 
-        If `time` is omitted the server uses the current time.
+        The result can be a vector (set of instant samples), a scalar, a
+        string, or even a matrix depending on the expression type. The
+        `resultType` field in the response indicates the shape of the
+        `result` array.
+
+        If `time` is omitted the server uses the current server time.
         Also accepts POST with a `application/x-www-form-urlencoded` body
         containing the same parameters.
       parameters:
         - name: query
           in: query
           required: true
-          description: PromQL expression to evaluate.
+          description: |
+            PromQL expression to evaluate. This can be any valid PromQL
+            expression including selectors (`up{job="node"}`), functions
+            (`rate(http_requests_total[5m])`), aggregations
+            (`sum by (job) (up)`), or arithmetic.
           schema:
             type: string
           example: up{job="node"}
@@ -37,20 +82,32 @@ paths:
           in: query
           required: false
           description: |
-            Evaluation timestamp. Accepts RFC 3339 (e.g. `2024-01-20T00:00:00Z`)
-            or Unix seconds (e.g. `1705708800`). Defaults to current server time.
+            Evaluation timestamp — the point in time at which the expression
+            is evaluated. Accepts RFC 3339 (e.g. `2024-01-20T00:00:00Z`) or
+            Unix seconds with optional decimal precision
+            (e.g. `1705708800` or `1705708800.123`). Defaults to current
+            server time when omitted.
           schema:
             type: string
         - name: timeout
           in: query
           required: false
           description: |
-            Evaluation timeout. Duration string such as `30s`, `1m`, or `2h`.
+            Evaluation timeout. If the query does not complete within this
+            duration, it is aborted and a 503 error is returned. Duration
+            string such as `30s`, `1m`, or `2h`. The server may cap this
+            value with its own configured maximum.
           schema:
             type: string
       responses:
         "200":
-          description: Query result.
+          description: |
+            Successful query result. The `data.resultType` field indicates
+            the shape of `data.result`:
+            - `vector`: array of `{ metric, value }` objects (most common for instant queries)
+            - `scalar`: a single `[timestamp, "value"]` pair
+            - `matrix`: array of `{ metric, values }` objects
+            - `string`: a single `[timestamp, "string"]` pair
           content:
             application/json:
               schema:
@@ -67,19 +124,35 @@ paths:
                         - 1705708800
                         - "1"
         "400":
-          description: Invalid query or parameters.
+          description: |
+            Bad request. The PromQL expression could not be parsed, or a
+            required parameter is missing or malformed. The `errorType` will
+            be `bad_data`.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "422":
+          description: |
+            Unprocessable Entity. The expression is syntactically valid but
+            could not be executed (e.g. referencing a non-existent function
+            or type error during evaluation). The `errorType` will be
+            `bad_data`.
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
         "500":
-          description: Internal server error.
+          description: Internal server error. The `errorType` will be `internal`.
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
         "503":
-          description: Service unavailable (backpressure).
+          description: |
+            Service unavailable. Returned when the query times out or the
+            server is under backpressure. The `errorType` will be
+            `unavailable`.
           content:
             application/json:
               schema:
@@ -93,13 +166,21 @@ paths:
         Evaluate a PromQL expression over a range of time, returning a matrix
         of time series with regularly spaced samples.
 
+        The expression is evaluated at each `step` interval between `start`
+        and `end` (both inclusive). The result is always a matrix
+        (`resultType: "matrix"`), where each series contains an array of
+        `[timestamp, value]` pairs spaced by `step`.
+
         Also accepts POST with a `application/x-www-form-urlencoded` body
         containing the same parameters.
       parameters:
         - name: query
           in: query
           required: true
-          description: PromQL expression to evaluate.
+          description: |
+            PromQL expression to evaluate at each step. Typically a
+            rate or aggregation function (e.g. `rate(http_requests_total[5m])`),
+            but any valid PromQL expression is accepted.
           schema:
             type: string
           example: rate(http_requests_total[5m])
@@ -107,7 +188,9 @@ paths:
           in: query
           required: true
           description: |
-            Start timestamp (inclusive). RFC 3339 or Unix seconds.
+            Start timestamp (inclusive) of the evaluation range. Accepts
+            RFC 3339 (e.g. `2024-01-20T00:00:00Z`) or Unix seconds with
+            optional decimal precision (e.g. `1705708800`).
           schema:
             type: string
           example: "2024-01-20T00:00:00Z"
@@ -115,7 +198,9 @@ paths:
           in: query
           required: true
           description: |
-            End timestamp (inclusive). RFC 3339 or Unix seconds.
+            End timestamp (inclusive) of the evaluation range. Accepts
+            RFC 3339 or Unix seconds. Must be greater than or equal to
+            `start`.
           schema:
             type: string
           example: "2024-01-20T01:00:00Z"
@@ -123,7 +208,10 @@ paths:
           in: query
           required: true
           description: |
-            Query resolution step width. Duration string such as `15s`, `1m`.
+            Query resolution step width — the interval between consecutive
+            evaluation points. Can be a duration string (e.g. `15s`, `1m`)
+            or a float number of seconds (e.g. `15`, `60.0`). Smaller steps
+            produce more data points but increase query cost.
           schema:
             type: string
           example: "15s"
@@ -131,12 +219,19 @@ paths:
           in: query
           required: false
           description: |
-            Evaluation timeout. Duration string such as `30s`, `1m`, or `2h`.
+            Evaluation timeout. If the query does not complete within this
+            duration, it is aborted and a 503 error is returned. Duration
+            string such as `30s`, `1m`, or `2h`. The server may cap this
+            value with its own configured maximum.
           schema:
             type: string
       responses:
         "200":
-          description: Range query result (matrix).
+          description: |
+            Range query result. Always returns `resultType: "matrix"` with
+            an array of time series, each containing regularly spaced
+            `[timestamp, value]` pairs. Series are sorted by their metric
+            label set.
           content:
             application/json:
               schema:
@@ -155,19 +250,33 @@ paths:
                         - - 1705708815
                           - "12"
         "400":
-          description: Invalid query or parameters.
+          description: |
+            Bad request. The PromQL expression could not be parsed, a
+            required parameter is missing or malformed, or `end` is before
+            `start`. The `errorType` will be `bad_data`.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "422":
+          description: |
+            Unprocessable Entity. The expression is syntactically valid but
+            could not be executed. The `errorType` will be `bad_data`.
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
         "500":
-          description: Internal server error.
+          description: Internal server error. The `errorType` will be `internal`.
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
         "503":
-          description: Service unavailable (backpressure).
+          description: |
+            Service unavailable. Returned when the query times out or the
+            server is under backpressure. The `errorType` will be
+            `unavailable`.
           content:
             application/json:
               schema:
@@ -178,7 +287,14 @@ paths:
       operationId: listSeries
       summary: List series
       description: |
-        Return the list of label sets that match a set of series selectors.
+        Return the list of label sets (unique metric identities) that match
+        a set of series selectors. This is useful for discovering which time
+        series exist for a given metric name or label combination.
+
+        At least one `match[]` argument must be provided. Each `match[]`
+        value is a PromQL series selector (e.g. `up`, `http_requests_total{method="GET"}`).
+        Multiple selectors are OR'd together — a series is returned if it
+        matches any of the provided selectors.
 
         Also accepts POST with a `application/x-www-form-urlencoded` body
         containing the same parameters.
@@ -188,7 +304,11 @@ paths:
           required: false
           description: |
             Repeated series selector. At least one `match[]` argument must be
-            provided (e.g. `match[]=up&match[]=process_start_time_seconds{job="node"}`).
+            provided. Each value is a PromQL series selector such as
+            `up{job="node"}`. Multiple selectors are combined with logical OR.
+
+            Example: `match[]=up&match[]=process_start_time_seconds{job="node"}`
+            returns series matching either selector.
           schema:
             type: array
             items:
@@ -199,25 +319,36 @@ paths:
         - name: start
           in: query
           required: false
-          description: Start timestamp. RFC 3339 or Unix seconds.
+          description: |
+            Start timestamp to limit the time range of series considered.
+            Only series with samples within `[start, end]` are returned.
+            RFC 3339 or Unix seconds.
           schema:
             type: string
         - name: end
           in: query
           required: false
-          description: End timestamp. RFC 3339 or Unix seconds.
+          description: |
+            End timestamp to limit the time range of series considered.
+            Only series with samples within `[start, end]` are returned.
+            RFC 3339 or Unix seconds.
           schema:
             type: string
         - name: limit
           in: query
           required: false
-          description: Maximum number of series to return.
+          description: |
+            Maximum number of series to return. A value of `0` disables the
+            limit. When omitted the server applies its default maximum.
           schema:
             type: integer
             minimum: 0
       responses:
         "200":
-          description: Matching label sets.
+          description: |
+            Array of label sets, one per matching series. Each label set is
+            an object whose keys are label names and values are label values.
+            The `__name__` label contains the metric name.
           content:
             application/json:
               schema:
@@ -229,19 +360,22 @@ paths:
                     job: node
                     instance: localhost:9100
         "400":
-          description: Invalid parameters.
+          description: |
+            Bad request. No `match[]` selectors were provided, or a selector
+            is malformed. The `errorType` will be `bad_data`.
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
         "500":
-          description: Internal server error.
+          description: Internal server error. The `errorType` will be `internal`.
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
         "503":
-          description: Service unavailable (backpressure).
+          description: |
+            Service unavailable. The `errorType` will be `unavailable`.
           content:
             application/json:
               schema:
@@ -252,14 +386,24 @@ paths:
       operationId: listLabels
       summary: List label names
       description: |
-        Return the list of label names. Optionally filtered by series selectors
-        and a time range.
+        Return the sorted list of all label names present in the database.
+        Optionally filtered by series selectors and/or a time range.
+
+        When `match[]` selectors are provided, only label names from series
+        matching those selectors are returned. When `start` and/or `end` are
+        provided, only series with samples in that time range are considered.
+
+        Also accepts POST with a `application/x-www-form-urlencoded` body
+        containing the same parameters.
       parameters:
         - name: match[]
           in: query
           required: false
           description: |
-            Optional series selectors to filter which label names are returned.
+            Optional series selectors to filter which label names are
+            returned. When provided, only label names that appear on series
+            matching at least one of these selectors are included. Multiple
+            selectors are combined with logical OR.
           schema:
             type: array
             items:
@@ -269,25 +413,34 @@ paths:
         - name: start
           in: query
           required: false
-          description: Start timestamp. RFC 3339 or Unix seconds.
+          description: |
+            Start timestamp to limit the time range considered. Only label
+            names from series with samples within `[start, end]` are
+            returned. RFC 3339 or Unix seconds.
           schema:
             type: string
         - name: end
           in: query
           required: false
-          description: End timestamp. RFC 3339 or Unix seconds.
+          description: |
+            End timestamp to limit the time range considered. RFC 3339 or
+            Unix seconds.
           schema:
             type: string
         - name: limit
           in: query
           required: false
-          description: Maximum number of label names to return.
+          description: |
+            Maximum number of label names to return. A value of `0` disables
+            the limit.
           schema:
             type: integer
             minimum: 0
       responses:
         "200":
-          description: List of label names.
+          description: |
+            Sorted list of label names as strings. Always includes built-in
+            labels like `__name__` if any metric data exists.
           content:
             application/json:
               schema:
@@ -299,19 +452,22 @@ paths:
                   - instance
                   - job
         "400":
-          description: Invalid parameters.
+          description: |
+            Bad request. A `match[]` selector is malformed or a parameter is
+            invalid. The `errorType` will be `bad_data`.
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
         "500":
-          description: Internal server error.
+          description: Internal server error. The `errorType` will be `internal`.
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
         "503":
-          description: Service unavailable (backpressure).
+          description: |
+            Service unavailable. The `errorType` will be `unavailable`.
           content:
             application/json:
               schema:
@@ -322,13 +478,22 @@ paths:
       operationId: listLabelValues
       summary: List label values
       description: |
-        Return the list of values for a given label name. Optionally filtered
-        by series selectors and a time range.
+        Return the sorted list of known values for a given label name.
+        Optionally filtered by series selectors and/or a time range.
+
+        For example, querying `/api/v1/label/job/values` returns all
+        distinct values of the `job` label across all series.
+
+        When `match[]` selectors are provided, only values from series
+        matching those selectors are returned. When `start` and/or `end` are
+        provided, only series with samples in that time range are considered.
       parameters:
         - name: name
           in: path
           required: true
-          description: The label name to retrieve values for.
+          description: |
+            The label name to retrieve values for. Common examples include
+            `job`, `instance`, or `__name__` (which returns all metric names).
           schema:
             type: string
           example: job
@@ -336,7 +501,10 @@ paths:
           in: query
           required: false
           description: |
-            Optional series selectors to filter which label values are returned.
+            Optional series selectors to filter which label values are
+            returned. When provided, only values of the named label that
+            appear on series matching at least one of these selectors are
+            included. Multiple selectors are combined with logical OR.
           schema:
             type: array
             items:
@@ -346,25 +514,34 @@ paths:
         - name: start
           in: query
           required: false
-          description: Start timestamp. RFC 3339 or Unix seconds.
+          description: |
+            Start timestamp to limit the time range considered. Only values
+            from series with samples within `[start, end]` are returned.
+            RFC 3339 or Unix seconds.
           schema:
             type: string
         - name: end
           in: query
           required: false
-          description: End timestamp. RFC 3339 or Unix seconds.
+          description: |
+            End timestamp to limit the time range considered. RFC 3339 or
+            Unix seconds.
           schema:
             type: string
         - name: limit
           in: query
           required: false
-          description: Maximum number of label values to return.
+          description: |
+            Maximum number of label values to return. A value of `0` disables
+            the limit.
           schema:
             type: integer
             minimum: 0
       responses:
         "200":
-          description: List of label values.
+          description: |
+            Sorted list of distinct values for the given label name as
+            strings. Returns an empty array if no series have the label.
           content:
             application/json:
               schema:
@@ -375,19 +552,22 @@ paths:
                   - node
                   - prometheus
         "400":
-          description: Invalid parameters.
+          description: |
+            Bad request. The label name is invalid, or a `match[]` selector
+            is malformed. The `errorType` will be `bad_data`.
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
         "500":
-          description: Internal server error.
+          description: Internal server error. The `errorType` will be `internal`.
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
         "503":
-          description: Service unavailable (backpressure).
+          description: |
+            Service unavailable. The `errorType` will be `unavailable`.
           content:
             application/json:
               schema:
@@ -403,7 +583,16 @@ paths:
         protocol.
 
         The request body must be a **Snappy-compressed** protobuf `WriteRequest`
-        message. This endpoint is only available when the server is built with
+        message (as defined by the Prometheus remote write specification). Each
+        `WriteRequest` contains one or more `TimeSeries` messages, each with a
+        set of labels and one or more timestamp/value sample pairs.
+
+        This endpoint is designed for integration with Prometheus remote-write
+        compatible agents and collectors. It is not intended as a general-purpose
+        high-throughput ingestion path — for bulk data loading, prefer dedicated
+        import tooling.
+
+        This endpoint is only available when the server is built with
         the `remote-write` feature.
       parameters:
         - name: Content-Type
@@ -429,24 +618,34 @@ paths:
             schema:
               type: string
               format: binary
-              description: Snappy-compressed protobuf `WriteRequest` message.
+              description: |
+                Snappy-compressed protobuf `WriteRequest` message. The
+                protobuf schema is defined by the Prometheus remote write
+                specification.
       responses:
         "204":
           description: Samples ingested successfully (empty body).
         "400":
-          description: Invalid request (wrong content type, decompression failure, or protobuf decode error).
+          description: |
+            Invalid request. Possible causes include wrong `Content-Type`,
+            Snappy decompression failure, protobuf decode error, or invalid
+            sample data (e.g. missing labels). The `errorType` will be
+            `bad_data`.
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
         "500":
-          description: Internal server error.
+          description: Internal server error. The `errorType` will be `internal`.
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
         "503":
-          description: Service unavailable (backpressure).
+          description: |
+            Service unavailable. The server is under backpressure and cannot
+            accept writes at this time. Clients should back off and retry.
+            The `errorType` will be `unavailable`.
           content:
             application/json:
               schema:
@@ -456,7 +655,10 @@ components:
   schemas:
     QueryResponse:
       type: object
-      description: Response for an instant query (`/api/v1/query`).
+      description: |
+        Response envelope for an instant query (`/api/v1/query`). On success,
+        `data` contains the query result. On error, `error` and `errorType`
+        describe the failure.
       properties:
         status:
           type: string
@@ -467,10 +669,20 @@ components:
           $ref: "#/components/schemas/QueryResult"
         error:
           type: string
-          description: Error message (present when status is `error`).
+          description: Human-readable error message (present when status is `error`).
         errorType:
           type: string
-          description: Error category (present when status is `error`).
+          description: |
+            Error category (present when status is `error`):
+            `bad_data`, `internal`, or `unavailable`.
+        warnings:
+          type: array
+          items:
+            type: string
+          description: |
+            Non-fatal warnings from the query engine, such as partial
+            results due to unavailable shards. May be present even when
+            `status` is `success`.
       required:
         - status
 
@@ -478,7 +690,18 @@ components:
       type: object
       description: |
         Result payload for an instant query. The `resultType` indicates the
-        shape of `result`: `vector`, `scalar`, `matrix`, or `string`.
+        shape of `result`:
+
+        - **`vector`**: An array of `{ metric, value }` objects — one per
+          matching time series. This is the most common result type for
+          instant queries on selectors and functions.
+        - **`matrix`**: An array of `{ metric, values }` objects — returned
+          when the expression produces a range vector (e.g. using a
+          subquery).
+        - **`scalar`**: A single `[timestamp, "value"]` pair — returned for
+          pure numeric expressions like `1 + 1`.
+        - **`string`**: A single `[timestamp, "string"]` pair — returned
+          for string literals.
       properties:
         resultType:
           type: string
@@ -490,17 +713,25 @@ components:
         result:
           description: |
             Query result. Shape depends on `resultType`:
-            - **vector**: array of `{ metric, value }` objects
-            - **matrix**: array of `{ metric, values }` objects
-            - **scalar**: `[timestamp, "value"]` tuple
-            - **string**: `[timestamp, "string"]` tuple
+            - **vector**: array of `{ metric, value }` objects where `value`
+              is a `[unix_timestamp, "sample_value"]` pair
+            - **matrix**: array of `{ metric, values }` objects where
+              `values` is an array of `[unix_timestamp, "sample_value"]` pairs
+            - **scalar**: `[unix_timestamp, "value"]` pair
+            - **string**: `[unix_timestamp, "string"]` pair
+
+            Sample values are always strings to support `"NaN"`, `"+Inf"`,
+            and `"-Inf"`.
       required:
         - resultType
         - result
 
     QueryRangeResponse:
       type: object
-      description: Response for a range query (`/api/v1/query_range`).
+      description: |
+        Response envelope for a range query (`/api/v1/query_range`). On
+        success, `data` always contains a matrix result. On error, `error`
+        and `errorType` describe the failure.
       properties:
         status:
           type: string
@@ -511,16 +742,28 @@ components:
           $ref: "#/components/schemas/QueryRangeResult"
         error:
           type: string
-          description: Error message (present when status is `error`).
+          description: Human-readable error message (present when status is `error`).
         errorType:
           type: string
-          description: Error category (present when status is `error`).
+          description: |
+            Error category (present when status is `error`):
+            `bad_data`, `internal`, or `unavailable`.
+        warnings:
+          type: array
+          items:
+            type: string
+          description: |
+            Non-fatal warnings from the query engine. May be present even
+            when `status` is `success`.
       required:
         - status
 
     QueryRangeResult:
       type: object
-      description: "Result payload for a range query (always `resultType: matrix`)."
+      description: |
+        Result payload for a range query. The `resultType` is always
+        `"matrix"`. Each element in `result` is a time series containing
+        regularly spaced samples between the requested `start` and `end`.
       properties:
         resultType:
           type: string
@@ -536,55 +779,78 @@ components:
 
     MatrixSeries:
       type: object
-      description: A single time series in a matrix result.
+      description: |
+        A single time series in a matrix result. Contains the full label set
+        identifying the series and an array of timestamp/value sample pairs
+        ordered chronologically.
       properties:
         metric:
           type: object
           additionalProperties:
             type: string
-          description: Label set identifying the series.
+          description: |
+            Label set identifying the series. Keys are label names, values
+            are label values. The `__name__` label contains the metric name.
         values:
           type: array
           items:
             type: array
             prefixItems:
               - type: number
-                description: Unix timestamp (seconds).
+                description: Unix timestamp in seconds (epoch time).
               - type: string
-                description: Sample value as a string.
+                description: |
+                  Sample value as a string. String encoding allows special
+                  values: `"NaN"`, `"+Inf"`, `"-Inf"`.
             minItems: 2
             maxItems: 2
-          description: Array of `[timestamp, value]` pairs.
+          description: |
+            Chronologically ordered array of `[timestamp, value]` pairs.
+            For range queries, pairs are spaced at the requested `step`
+            interval. Gaps may appear if no sample was found within the
+            lookback window at a given evaluation step.
       required:
         - metric
         - values
 
     VectorSeries:
       type: object
-      description: A single instant-vector sample.
+      description: |
+        A single instant-vector sample. Represents one time series at one
+        point in time, as returned by instant queries with
+        `resultType: "vector"`.
       properties:
         metric:
           type: object
           additionalProperties:
             type: string
-          description: Label set identifying the series.
+          description: |
+            Label set identifying the series. Keys are label names, values
+            are label values. The `__name__` label contains the metric name.
         value:
           type: array
           prefixItems:
             - type: number
-              description: Unix timestamp (seconds).
+              description: Unix timestamp in seconds (epoch time).
             - type: string
-              description: Sample value as a string.
+              description: |
+                Sample value as a string. String encoding allows special
+                values: `"NaN"`, `"+Inf"`, `"-Inf"`.
           minItems: 2
           maxItems: 2
-          description: A `[timestamp, value]` pair.
+          description: |
+            A single `[timestamp, value]` pair representing the sample at
+            the evaluated point in time.
       required:
         - metric
         - value
 
     SeriesResponse:
       type: object
-      description: Response for the series listing endpoint (`/api/v1/series`).
+      description: |
+        Response for the series listing endpoint (`/api/v1/series`). On
+        success, `data` contains an array of label sets — one object per
+        matching time series.
       properties:
         status:
           type: string
@@ -597,17 +863,24 @@ components:
             type: object
             additionalProperties:
               type: string
-          description: Array of label sets, one per matching series.
+          description: |
+            Array of label sets, one per matching series. Each object is a
+            map of label names to label values. The `__name__` label contains
+            the metric name.
         error:
           type: string
+          description: Human-readable error message (present when status is `error`).
         errorType:
           type: string
+          description: Error category (present when status is `error`).
       required:
         - status
 
     LabelsResponse:
       type: object
-      description: Response for the label names endpoint (`/api/v1/labels`).
+      description: |
+        Response for the label names endpoint (`/api/v1/labels`). On success,
+        `data` contains a sorted array of label name strings.
       properties:
         status:
           type: string
@@ -618,17 +891,24 @@ components:
           type: array
           items:
             type: string
-          description: Sorted list of label names.
+          description: |
+            Alphabetically sorted list of label names. Includes built-in
+            labels like `__name__` if any metric data exists.
         error:
           type: string
+          description: Human-readable error message (present when status is `error`).
         errorType:
           type: string
+          description: Error category (present when status is `error`).
       required:
         - status
 
     LabelValuesResponse:
       type: object
-      description: Response for the label values endpoint (`/api/v1/label/{name}/values`).
+      description: |
+        Response for the label values endpoint
+        (`/api/v1/label/{name}/values`). On success, `data` contains a
+        sorted array of distinct values for the requested label.
       properties:
         status:
           type: string
@@ -639,18 +919,29 @@ components:
           type: array
           items:
             type: string
-          description: Sorted list of values for the given label.
+          description: |
+            Alphabetically sorted list of distinct values for the given
+            label. Returns an empty array if no series carry the label.
         error:
           type: string
+          description: Human-readable error message (present when status is `error`).
         errorType:
           type: string
+          description: Error category (present when status is `error`).
       required:
         - status
 
     ErrorResponse:
       type: object
       description: |
-        Prometheus-compatible error response. Returned for all error cases.
+        Prometheus-compatible error response. Returned for all non-2xx
+        responses. The `errorType` indicates the category:
+
+        - `bad_data` (HTTP 400/422): The request was malformed or the
+          expression could not be executed.
+        - `internal` (HTTP 500): An unexpected server-side error occurred.
+        - `unavailable` (HTTP 503): The server is temporarily unable to
+          handle the request due to backpressure or a query timeout.
       properties:
         status:
           type: string
@@ -658,15 +949,17 @@ components:
         errorType:
           type: string
           description: |
-            Error category: `bad_data` (400), `internal` (500), or
-            `unavailable` (503).
+            Error category. Maps to HTTP status codes:
+            - `bad_data` → 400 or 422
+            - `internal` → 500
+            - `unavailable` → 503
           enum:
             - bad_data
             - internal
             - unavailable
         error:
           type: string
-          description: Human-readable error message.
+          description: Human-readable error message describing what went wrong.
       required:
         - status
         - errorType
