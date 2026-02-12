@@ -11,7 +11,8 @@ npm i -g mint
 mint dev
 ```
 
-Preview at `http://localhost:3000`.
+Preview at `http://localhost:3000`. 
+
 
 ## Links
 
