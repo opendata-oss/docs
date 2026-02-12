@@ -66,20 +66,14 @@
         "group": "Vector",
         "icon": "brain",
         "pages": [
-          "vector/index",
-          "vector/quickstart",
-          "vector/indexing",
-          "vector/querying",
-          "vector/storage-design"
+          "vector/index"
         ]
       },
       {
         "group": "Key-Value",
         "icon": "key",
         "pages": [
-          "keyvalue/index",
-          "keyvalue/quickstart",
-          "keyvalue/api"
+          "keyvalue/index"
         ]
       }
     ]
