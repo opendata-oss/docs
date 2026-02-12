@@ -1,3 +1,113 @@
 ---
 title: Storage
 ---
+
+All OpenData databases encode their durable storage as key-value records in
+SlateDB. The challenge is mapping rich domain models (time series, events, vectors)
+onto flat, ordered KV pairs.  To accomplish this, we leverage a few design
+patterns to project concepts onto a key-value model.
+
+<Warning >
+  Not all databases use all of these patterns or techniques. This page serves
+  as a general overview of the storage patterns used.
+</Warning>
+
+## Structured Key Model
+
+LSM trees provide efficient point lookups and range scans on key prefixes.
+This is due to the physical clustering of keys with based on their lexicographical
+sort ordering. 
+
+To take advantage of this, OpenData systems carefully construct keys both to
+model the raw data but also to construct secondary indexes and embed them within
+the underlying key-value storage. 
+
+In the example below, we have three different "types" of keys. The type of the
+key is encoded in the first byte `data|index|meta`, and then the value of the key
+is dependent on the type. The raw data key is just the user ID. For the inverted
+index, the key is `attribute_name:attribute_value` and the value are all the
+user ids that have the given attribute pair. The metadata keys are global keys
+that describe the database (e.g. the version or total number of rows).
+
+
+<pre className="ascii-art">{`
+┌──────────────────────────────────────────────────────────────┐
+│▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒ storage layout ▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒│
+├──────────────────────────────────────────────────────────────┤
+│                                                              │
+│       ╔═══════════════════════════════════════════════╗      │
+│    │  ║type  |    structured key  |    value          ║      │
+│    │  ╚═══════════════════════════════════════════════╝      │
+│    │  ╔═══════════════════════════════════════════════╗      │
+│    │  ║data  |    user_1          | {name: alice, ... ║      │
+│    │  ║data  |    user_2          | {name: bob, ...   ║      │
+│    │  ╚═══════════════════════════════════════════════╝      │
+│    │  ╔═══════════════════════════════════════════════╗      │
+│  sort ║index |    name:alice      | [1, 4, 5]         ║      │
+│ order ║index |    name:bob        | [2, 3, 7]         ║      │
+│    │  ╚═══════════════════════════════════════════════╝      │
+│    │  ╔═══════════════════════════════════════════════╗      │
+│    │  ║meta  |    version         | 0x1               ║      │
+│    ▼  ║meta  |    num_rows        | 0x1337            ║      │
+│       ╚═══════════════════════════════════════════════╝      │
+│                                                              │
+└──────────────────────────────────────────────────────────────┘
+`}</pre>
+
+
+### Segmenting Data
+
+Because keys are physically sorted in the LSM, encoding a segment identifier
+into the key naturally groups related records together on disk. A query that
+targets a single segment only scans the key range for that segment so everything
+outside it is never read. Each segment can also be managed independently:
+old segments can be compacted, rolled up, or garbage collected without
+affecting the rest of the keyspace.
+
+<pre className="ascii-art">{`
+┌──────────────────────────────────────────────────────────┐
+│▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒ segmented keys ▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒│
+├──────────────────────────────────────────────────────────┤
+│                                                          │
+│   ║ type  | segment | key        | value               ║ │
+│   ╠═══════╪═════════╪════════════╪═════════════════════╣ │
+│   ║ data  | seg_0   | key_a      | ...                 ║ │
+│   ║ data  | seg_0   | key_b      | ...                 ║ │
+│   ║ data  | seg_0   | key_c      | ...                 ║ │
+│   ╠═══════╪═════════╪════════════╪═════════════════════╣ │
+│   ║ data  | seg_1   | key_d      | ...                 ║ │
+│   ║ data  | seg_1   | key_e      | ...                 ║ │
+│   ╠═══════╪═════════╪════════════╪═════════════════════╣ │
+│   ║ data  | seg_2   | key_f      | ...                 ║ │
+│   ║ data  | seg_2   | key_g      | ...                 ║ │
+│   ║ data  | seg_2   | key_h      | ...                 ║ │
+│   ║ data  | seg_2   | key_i      | ...                 ║ │
+│             ▲                                            │
+│             └── query for seg_2 only scans               │
+│                 the seg_2 key range                      │
+└──────────────────────────────────────────────────────────┘
+`}</pre>
+
+The segment field can represent whatever boundary makes sense for the data
+model — a time window, a partition ID, a record type prefix, or a monotonic
+sequence number. The key insight is that the LSM's sort order turns logical
+partitions into physical locality, giving you the benefits of partitioned
+storage without managing separate stores.
+
+### Miscellaneous
+
+OpenData systems actively leverage some interesting features of SlateDB
+in order to optimize storage efficiency and performance:
+
+| Property | How it works | Benefit |
+| --- | --- | --- |
+| **Prefix compression** | Common prefixes are only stored once the storage system. | OpenData keys rely heavily on prefixes, and these prefixes are often repeated. This reduces storage overhead without requiring explicit dictionary encoding. |
+| **Merge operators** | New entries are written as merge operands instead of read-modify-write. The LSM merges them lazily during compaction. | Turns N individual writes into a single merged result, avoiding read-modify-write cycles for posting lists and bitmaps. |
+
+<Note>
+  For specific encoding details and storage layouts, see the per-database
+  design pages:
+  [Timeseries](/timeseries/storage-design),
+  [Log](/log/storage-design), and
+  [Vector](/vector/storage-design).
+</Note>
