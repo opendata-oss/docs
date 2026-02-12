@@ -1,0 +1,48 @@
+---
+title: Deployment
+---
+
+OpenData is fundamentally designed to have a flexible architecture
+that scales to meet the use case. Smaller deployments can be deployed
+on a single machine while still providing (meaningfuly) high availability
+and object-storage backed durability. Larger deployments can scale to multiple
+zones and regions, providing high availability and disaster recovery.
+
+## Embedded Option
+
+At their core each database can run as an embedded rust process that
+you can access via the rust API (FFI integrations for other languages
+are planned, though not currently prioritized). The embedded option
+is a fully viable option for production deployments. 
+
+Since durability is managed fully by object storage, a crash/restart
+of an application embedding a database will not lose any data that
+was acknowledged as durable. While we recommend running OpenData services
+with persistent disks for cache durability, this is not required.
+
+In addition, if a pod running the embedded database crashes, new deployments
+of it will fence the old writer to ensure consistentcy in the event the
+old service comes back online and attempts to write new data.
+
+## Single Binary Server
+
+OpenData systems are fully deployable with single binaries. We provide
+binaries for most common operating systems and architectures as well as
+docker images. This makes it easy to deploy an OpenData system both on
+your laptop as well as in production.
+
+The difference between the embedded and single binary server options is that
+the binaries package additional dependencies required to run an HTTP server
+to handle requests from a client over the network. 
+
+## Distributed System
+
+<Info>
+    We are currently designing more native distributed deployment options
+    that will support shuffling data across partitions for a smoother
+    scaling experience.
+</Info>
+
+For larger deployments, we currently recommend partitioning your data into
+cells and deploying a single-writer database in each cell. This allows you to
+scale your deployment horizontally by adding more partitions.
