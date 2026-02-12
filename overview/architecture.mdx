@@ -1,0 +1,160 @@
+---
+title: Architecture
+---
+
+OpenData databases share a common architecture built on [SlateDB](https://slatedb.io),
+an LSM tree engine on object storage. For details on the read and write paths,
+see [Writing Data](/overview/writing-data) and [Reading Data](/overview/reading-data).
+
+## Single Writer
+
+OpenData databases are designed to operate as single-writer systems
+for each partition of the data. This is conceptually similar to a
+leader-follower architecture, but without the followers: object storage takes
+over the role that replicas traditionally play, providing durability and
+availability without requiring the writer to coordinate replication.
+
+Writer failover and fencing of old writers is handled by the object storage
+compare-and-set mechanism. The new writer fences the old one via a
+compare-and-set on the manifest and resumes from durable state in object
+storage. This ensures that data written to OpenData databases is strongly
+consistent as soon durability is acknowledged.
+
+## Disaggregated Compaction & GC
+
+Because all data lives in object storage, compaction and garbage collection do
+not need to run on the same process or machine as the writer.  This means that
+background maintenance never competes with ingest or queries for CPU, memory, or
+disk I/O.
+
+It also means compaction and GC workloads can be scheduled on cheaper, lower-priority
+compute (e.g. spot instances) since they are stateless and can be restarted at
+any time without data loss. The writer and readers continue to operate normally
+regardless of whether compaction is running.
+
+<pre className="ascii-art">{`
+┌─────────────────────────────────────────────────────────────────────┐
+│▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒ disaggregated compaction & gc ▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒│
+├─────────────────────────────────────────────────────────────────────┤
+│                                                                     │
+│  ╔══════════════╗       ╔══════════════════════════════════════╗    │
+│  ║              ║▒      ║                                      ║▒   │
+│  ║    Writer    ║──────▶║            Object Storage            ║▒   │
+│  ║              ║▒      ║                                      ║▒   │
+│  ╚══════════════╝▒      ╚══════════════╦═══════════════════════╝▒   │
+│   ▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒       ▒▒▒▒▒▒▒▒▒▒▒▒▒▒│▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒   │
+│                                        │                            │
+│                          ┌─────────────┼─────────────┐              │
+│                          │             │             │              │
+│                          ▼             ▼             ▼              │
+│                   ╔════════════╗  ╔════════════╗  ╔════════════╗    │
+│                   ║            ║▒ ║            ║▒ ║            ║▒   │
+│                   ║ Compactor  ║▒ ║ Compactor  ║▒ ║     GC     ║▒   │
+│                   ║            ║▒ ║            ║▒ ║            ║▒   │
+│                   ╚════════════╝▒ ╚════════════╝▒ ╚════════════╝▒   │
+│                    ▒▒▒▒▒▒▒▒▒▒▒▒▒▒  ▒▒▒▒▒▒▒▒▒▒▒▒▒▒  ▒▒▒▒▒▒▒▒▒▒▒▒▒▒   │
+│                                                                     │
+└─────────────────────────────────────────────────────────────────────┘
+`}</pre>
+
+## Stateless Zonal Ingestion
+
+Databases that don't require read-your-write consistency can ingest data from
+stateless services deployed in each availability zone. This allows for both
+high-availability ingest and avoids cross-zone data transfers. 
+
+For example, ingesting metrics into `timeseries` without stateless zonal
+ingestion would require a remote write to the single-writer deployed in a
+particular zone.  If the single-writer is down, the metric write request will
+fail.  With stateless zonal ingestion, the metrics are ingested directly into S3
+from within the region they are produced and then transferred to the single
+writer over S3.  This both avoids the cross-zone data transfer costs and only
+depends on the availability of S3.
+
+<pre className="ascii-art">{`
+┌─────────────────────────────────────────────────────────────────────┐
+│▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒ stateless zonal ingestion ▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒│
+├─────────────────────────────────────────────────────────────────────┤
+│                                                                     │
+│      ╔Zone A══════════════════════╗     ╔Zone B══════════╗          │
+│      ║ ┌──────────┐  ┌──────────┐ ║▒    ║  ┌──────────┐  ║▒         │
+│      ║ │   app    │  │   app    │ ║▒    ║  │   app    │  ║▒         │
+│      ║ └───┬──────┘  └──────┬───┘ ║▒    ║  └─────┬────┘  ║▒         │
+│      ║     │                │     ║▒    ║        │       ║▒         │
+│      ║     │  ┌──────────┐  │     ║▒    ║  ┌─────▼────┐  ║▒         │
+│      ║     └─▶│ ingestor │◀─┘     ║▒    ║  │ ingestor │  ║▒         │
+│      ║        └──────────┘        ║▒    ║  └──────────┘  ║▒         │
+│      ╚══════════════╦═════════════╝▒    ╚════════╦═══════╝▒         │
+│       ▒▒▒▒▒▒▒▒▒▒▒▒▒▒│▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒     ▒▒▒▒▒▒▒▒│▒▒▒▒▒▒▒▒▒         │
+│                     └───────────┬────────────────┘                  │
+│                                 │                                   │
+│                                 ▼                                   │
+│       ╔═══════════════════════════════════════════════════╗         │
+│       ║                                                   ║▒        │
+│       ║                  Object Storage                   ║▒        │
+│       ║                                                   ║▒        │
+│       ╚═════════════════════════╦═════════════════════════╝▒        │
+│        ▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒│▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒        │
+│                                 │                                   │
+│                                 │                                   │
+│                  ╔Zone C════════╬═════════════╗                     │
+│                  ║       ┌──────▼──────┐      ║▒                    │
+│                  ║       │ main writer │      ║▒                    │
+│                  ║       └─────────────┘      ║▒                    │
+│                  ╚════════════════════════════╝▒                    │
+│                   ▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒                    │
+│                                                                     │
+└─────────────────────────────────────────────────────────────────────┘
+`}</pre>
+
+## Multiple Readers
+
+Because all state lives in object storage, you can deploy any number of
+read-only replicas independently of the writer. These replicas are stateless
+and can be added or removed at any time without coordination.
+
+Readers automatically watch object storage for new data written by the main
+writer, so they stay up to date without any direct coordination between
+processes. While performance depends on warm caches, data is always available
+for reads even without the cache by accessing it directly from object storage.
+This is a particularly useful property for scaling out read workloads: adding a
+new read partition does not require any coordination with the main writer or
+other readers. Other readers' caches will eventually drain as queries for that
+subset of data are no longer served while the new reader's cache will warm up as
+it serves queries. 
+
+This architecture also enables zonal reads, which can help reduce latency and
+intra-zone data transfers.
+
+<pre className="ascii-art">{`
+┌──────────────────────────────────────────────────────────────────────────────┐
+│▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒ multi-reader setup ▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒│
+├──────────────────────────────────────────────────────────────────────────────┤
+│                                                                              │
+│   ╔Zone A══════════════╗    ╔══════════════════╗    ╔Zone B══════════════╗   │
+│   ║                    ║▒   ║                  ║▒   ║                    ║▒  │
+│   ║  ┌──────────────┐  ║▒   ║                  ║▒   ║  ┌──────────────┐  ║▒  │
+│   ║  │   Reader A   ◀──╬────╣                  ╠────╬──▶   Reader B   │  ║▒  │
+│   ║  │ (Range A-Z)  │  ║▒   ║                  ║▒   ║  │ (Range A-L)  │  ║▒  │
+│   ║  └──────────────┘  ║▒   ║                  ║▒   ║  └──────────────┘  ║▒  │
+│   ║                    ║▒   ║      Object      ║▒   ║                    ║▒  │
+│   ║                    ║▒   ║     Storage      ║▒   ║                    ║▒  │
+│   ║  ┌──────────────┐  ║▒   ║                  ║▒   ║  ┌──────────────┐  ║▒  │
+│   ║  │              │  ║▒   ║                  ║▒   ║  │   Reader C   │  ║▒  │
+│   ║  │ Main Writer  │──╬────▶                  ╠────╬──▶ (Range M-Z)  │  ║▒  │
+│   ║  │              │  ║▒   ║                  ║▒   ║  └──────────────┘  ║▒  │
+│   ║  └──────────────┘  ║▒   ║                  ║▒   ║                    ║▒  │
+│   ╚════════════════════╝▒   ╚══════════════════╝▒   ╚════════════════════╝▒  │
+│    ▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒    ▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒    ▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒  │
+│                                                                              │
+└──────────────────────────────────────────────────────────────────────────────┘
+`}</pre>
+
+## Checkpoints & Backups
+
+The nature of designing a system as an immutable LSM tree on top of object
+storage means that checkpointing data and/or creating backups is trivial.
+A single, O(1) metadata operation records the current state of the database
+and marks the files as immune from garbage collection. This checkpointed state
+can be retained for as long as desired and used to restore the database to
+a previous state, or to create a branch for testing or debugging.

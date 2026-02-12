@@ -35,47 +35,18 @@ as shared storage access primitives. Each database implements its own
 indexes and data layouts for optimal read performance, but all use
 SlateDB queries to access the data through multiple levels of caches.
 
-### Multiple Reader Architecture
+### Read Freshness
 
-The benefit of this architecture is that while performance depends on
-warm caches, data is always available for reads even without the cache
-by accessing it directly from object storage. This is particularly useful
-property for scaling out read workloads: adding a new read partition does
-not require any coordination with the main writer or other readers. Other
-readers' caches will eventually drain as queries for that subset of data
-are no longer served while the new reader's cache will warm up as it serves
-queries. This architecture also enables zonal reads, which can help reduce
-latency and intra-zone data transfers.
+Read freshness can be measured in terms of object storage round trips between
+a write being accepted and it being visible to a query:
 
-<pre className="ascii-art">{`
-┌──────────────────────────────────────────────────────────────────────────────┐
-│▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒ multi-reader setup ▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒│
-├──────────────────────────────────────────────────────────────────────────────┤
-│                                                                              │
-│   ╔Zone A══════════════╗    ╔══════════════════╗    ╔Zone B══════════════╗   │
-│   ║                    ║▒   ║                  ║▒   ║                    ║▒  │
-│   ║  ┌──────────────┐  ║▒   ║                  ║▒   ║  ┌──────────────┐  ║▒  │
-│   ║  │   Reader A   ◀──╬────╣                  ╠────╬──▶   Reader B   │  ║▒  │
-│   ║  │ (Range A-Z)  │  ║▒   ║                  ║▒   ║  │ (Range A-L)  │  ║▒  │
-│   ║  └──────────────┘  ║▒   ║                  ║▒   ║  └──────────────┘  ║▒  │
-│   ║                    ║▒   ║      Object      ║▒   ║                    ║▒  │
-│   ║                    ║▒   ║     Storage      ║▒   ║                    ║▒  │
-│   ║  ┌──────────────┐  ║▒   ║                  ║▒   ║  ┌──────────────┐  ║▒  │
-│   ║  │              │  ║▒   ║                  ║▒   ║  │   Reader C   │  ║▒  │
-│   ║  │ Main Writer  │──╬────▶                  ╠────╬──▶ (Range M-Z)  │  ║▒  │
-│   ║  │              │  ║▒   ║                  ║▒   ║  └──────────────┘  ║▒  │
-│   ║  └──────────────┘  ║▒   ║                  ║▒   ║                    ║▒  │
-│   ╚════════════════════╝▒   ╚══════════════════╝▒   ╚════════════════════╝▒  │
-│    ▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒    ▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒    ▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒  │
-│                                                                              │
-└──────────────────────────────────────────────────────────────────────────────┘
-`}</pre>
+| Write Path | Read Target | S3 Round Trips | Description |
+| --- | --- | --- | --- |
+| Direct write to writer | Writer | **0** | Data is written to the in-memory Delta and is immediately readable on the writer with no object storage interaction. |
+| [Zonal ingest](/overview/architecture#stateless-zonal-ingestion) | Writer | **1** | Data is written to object storage by a stateless ingestor and must be picked up by the writer before it is readable. |
+| Any | [Read replica](/overview/architecture#multiple-readers) | **+1** | Read replicas discover new data by watching object storage for manifest updates, adding one additional round trip on top of whatever the write path requires. |
 
-### Checkpoints & Backups
+Each round trip typically adds around 100ms of latency plus the polling
+interval, which is configurable. In practice, the polling interval dominates
+the freshness delay.
 
-The nature of designing a system as an immutable LSM tree on top of object
-storage means that checkpointing data and/or creating backups is trivial.
-A single, O(1) metadata operation records the current state of the database
-and marks the files as immune from garbage collection. This checkpointed state
-can be retained for as long as desired and used to restore the database to
-a previous state, or to create a branch for testing or debugging.
