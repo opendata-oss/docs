@@ -1,6 +1,6 @@
 {
   "$schema": "https://mintlify.com/docs.json",
-  "theme": "mint",
+  "theme": "maple",
   "name": "OpenData",
   "colors": {
     "primary": "#525252",
@@ -9,125 +9,57 @@
   },
   "favicon": "/favicon.svg",
   "navigation": {
-    "tabs": [
+    "groups": [
       {
-        "tab": "Overview",
-        "groups": [
-          {
-            "group": "Concepts",
-            "pages": [
-              "index",
-              "overview/writing-data",
-              "overview/reading-data",
-              "overview/storage",
-              "overview/deployment",
-              "overview/tradeoffs"
-            ]
-          },
-          {
-            "group": "Community",
-            "pages": [
-              "overview/contributing",
-              "overview/roadmap"
-            ]
-          }
+        "group": "Concepts",
+        "pages": [
+          "index",
+          "overview/writing-data",
+          "overview/reading-data",
+          "overview/storage",
+          "overview/deployment"
         ]
       },
       {
-        "tab": "Timeseries",
+        "group": "Timeseries",
         "icon": "chart-line",
-        "groups": [
-          {
-            "group": "Getting started",
-            "pages": [
-              "timeseries/index",
-              "timeseries/quickstart"
-            ]
-          },
-          {
-            "group": "Usage",
-            "pages": [
-              "timeseries/configuration",
-              "timeseries/querying"
-            ]
-          },
-          {
-            "group": "Design",
-            "pages": [
-              "timeseries/storage-design"
-            ]
-          }
+        "pages": [
+          "timeseries/index",
+          "timeseries/quickstart",
+          "timeseries/configuration",
+          "timeseries/querying",
+          "timeseries/storage-design"
         ]
       },
       {
-        "tab": "Log",
+        "group": "Log",
         "icon": "scroll",
-        "groups": [
-          {
-            "group": "Getting started",
-            "pages": [
-              "log/index",
-              "log/quickstart"
-            ]
-          },
-          {
-            "group": "Usage",
-            "pages": [
-              "log/writing",
-              "log/reading"
-            ]
-          },
-          {
-            "group": "Design",
-            "pages": [
-              "log/storage-design"
-            ]
-          }
+        "pages": [
+          "log/index",
+          "log/quickstart",
+          "log/writing",
+          "log/reading",
+          "log/storage-design"
         ]
       },
       {
-        "tab": "Vector",
+        "group": "Vector",
         "icon": "brain",
-        "groups": [
-          {
-            "group": "Getting started",
-            "pages": [
-              "vector/index",
-              "vector/quickstart"
-            ]
-          },
-          {
-            "group": "Usage",
-            "pages": [
-              "vector/indexing",
-              "vector/querying"
-            ]
-          },
-          {
-            "group": "Design",
-            "pages": [
-              "vector/storage-design"
-            ]
-          }
+        "pages": [
+          "vector/index",
+          "vector/quickstart",
+          "vector/indexing",
+          "vector/querying",
+          "vector/storage-design"
         ]
       },
       {
-        "tab": "Key-Value",
+        "group": "Key-Value",
         "icon": "key",
-        "groups": [
-          {
-            "group": "Getting started",
-            "pages": [
-              "keyvalue/index",
-              "keyvalue/quickstart"
-            ]
-          },
-          {
-            "group": "Usage",
-            "pages": [
-              "keyvalue/api"
-            ]
-          }
+        "pages": [
+          "keyvalue/index",
+          "keyvalue/quickstart",
+          "keyvalue/api"
         ]
       }
     ]
