@@ -14,9 +14,9 @@ paths:
       operationId: append
       summary: Append records
       description: |
-        Append one or more records to the log. Each record has an optional key
-        (used for partitioning scans) and a value (arbitrary bytes, base64-encoded
-        in JSON).
+        Append one or more records to the log. Each record has a key (used for
+        partitioning scans) and a value (arbitrary bytes, both base64-encoded in
+        JSON).
 
         Set `awaitDurable` to `true` to block until the records are persisted to
         durable storage. When `false` (the default), the server acknowledges the
@@ -29,8 +29,7 @@ paths:
               $ref: "#/components/schemas/AppendRequest"
             example:
               records:
-                - key:
-                    value: "dGVzdC1rZXk="
+                - key: "dGVzdC1rZXk="
                   value: "dGVzdC12YWx1ZQ=="
               awaitDurable: false
       responses:
@@ -120,8 +119,7 @@ paths:
                 $ref: "#/components/schemas/ScanResponse"
               example:
                 status: success
-                key:
-                  value: "dGVzdC1rZXk="
+                key: "dGVzdC1rZXk="
                 values:
                   - sequence: 42
                     value: "dGVzdC12YWx1ZQ=="
@@ -178,8 +176,8 @@ paths:
               example:
                 status: success
                 keys:
-                  - value: "ZXZlbnRz"
-                  - value: "b3JkZXJz"
+                  - key: "ZXZlbnRz"
+                  - key: "b3JkZXJz"
         "500":
           description: Internal server error.
           content:
@@ -290,25 +288,27 @@ components:
       type: object
       description: Wrapper around a byte-string key (base64-encoded in JSON).
       properties:
-        value:
+        key:
           type: string
           format: byte
           description: The key bytes, base64-encoded.
       required:
-        - value
+        - key
 
     Record:
       type: object
-      description: A single log record containing an optional key and a value.
+      description: A single log record containing a key and a value.
       properties:
         key:
-          $ref: "#/components/schemas/Key"
-          description: Optional partition key.
+          type: string
+          format: byte
+          description: Partition key, base64-encoded.
         value:
           type: string
           format: byte
           description: Record payload, base64-encoded.
       required:
+        - key
         - value
 
     AppendRequest:
@@ -371,8 +371,9 @@ components:
           type: string
           example: success
         key:
-          $ref: "#/components/schemas/Key"
-          description: The key that was scanned.
+          type: string
+          format: byte
+          description: The key that was scanned, base64-encoded.
         values:
           type: array
           items:
