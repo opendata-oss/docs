@@ -55,7 +55,7 @@ that describe the database (e.g. the version or total number of rows).
 `}</pre>
 
 
-### Segmenting Data
+## Segmenting Data
 
 Because keys are physically sorted in the LSM, encoding a segment identifier
 into the key naturally groups related records together on disk. A query that
@@ -94,7 +94,7 @@ sequence number. The key insight is that the LSM's sort order turns logical
 partitions into physical locality, giving you the benefits of partitioned
 storage without managing separate stores.
 
-### Miscellaneous
+## Miscellaneous
 
 OpenData systems actively leverage some interesting features of SlateDB
 in order to optimize storage efficiency and performance:
