@@ -2,3 +2,25 @@
 title: Timeseries
 description: Object-store-native time series database with Prometheus compatibility
 ---
+
+Timeseries is a Prometheus-compatible metrics database built on
+[SlateDB](https://slatedb.io) and object storage. It speaks PromQL, scrapes
+Prometheus targets, accepts OpenTelemetry metrics, and works out of the box
+with Grafana. Because all data is durably stored in object storage, a single
+replica provides full durability with no operational overhead for replication
+or backups.
+
+<CardGroup cols={2}>
+  <Card title="Quickstart" icon="rocket" href="/timeseries/quickstart">
+    Install Timeseries and query your first metrics in under five minutes
+  </Card>
+  <Card title="API Reference" icon="code" href="/api-reference/timeseries/query">
+    Browse the Prometheus-compatible query and write API
+  </Card>
+  <Card title="Storage Design" icon="hard-drive" href="/timeseries/storage-design">
+    How Timeseries organizes data in time buckets on SlateDB
+  </Card>
+  <Card title="GitHub" icon="github" href="https://github.com/opendata-oss/opendata/tree/main/timeseries">
+    View the source code, open issues, and contribute
+  </Card>
+</CardGroup>

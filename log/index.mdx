@@ -2,3 +2,24 @@
 title: Log
 description: Key-oriented event streaming built on an LSM tree
 ---
+
+Log is an append-only event streaming system built on [SlateDB](https://slatedb.io)
+and object storage. Records are organized by key and assigned a global sequence
+number, making it easy to fan out ordered events to multiple consumers. Because
+all data is durably stored in object storage, a single replica provides full
+durability with no operational overhead for replication or backups.
+
+<CardGroup cols={2}>
+  <Card title="Quickstart" icon="rocket" href="/log/quickstart">
+    Install Log and append your first events in under five minutes
+  </Card>
+  <Card title="API Reference" icon="code" href="/api-reference/log/append">
+    Browse the full REST API for appending, scanning, and managing logs
+  </Card>
+  <Card title="Storage Design" icon="hard-drive" href="/log/storage-design">
+    How Log maps streams to LSM keys with segment-based compaction
+  </Card>
+  <Card title="GitHub" icon="github" href="https://github.com/opendata-oss/opendata/tree/main/log">
+    View the source code, open issues, and contribute
+  </Card>
+</CardGroup>
