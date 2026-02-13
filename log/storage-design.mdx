@@ -2,3 +2,100 @@
 title: Storage design
 description: How Log maps streams to LSM keys with segment-based compaction
 ---
+
+Log stores all data as key-value records in SlateDB. Each user key is its own
+independent log stream (similar to a "topic" in Kafka). Writes are appended to
+the WAL and memtable, then flushed to sorted string tables (SSTs). LSM
+compaction naturally groups entries by key prefix over time, providing efficient
+sequential reads even for historical
+data.
+
+<Note>
+  This page covers the conceptual storage model. For exact byte-level encoding
+  schemas, see the
+  [storage RFC on GitHub](https://github.com/opendata-oss/opendata/blob/main/log/rfcs/0001-storage.md).
+</Note>
+
+## Key encoding
+
+SlateDB keys are a composite of the user key and a `u64` sequence number. A
+version prefix and record type discriminator provide forward compatibility.
+
+| Component | Description |
+| --- | --- |
+| **Version** | A `u8` prefix (initially `1`) for forward compatibility |
+| **Type** | A `u8` discriminator identifying the record type (`0x01` for log entries, `0x02` for sequence blocks) |
+| **Key** | The user key, encoded as `Bytes` |
+| **Sequence** | A `u64` sequence number |
+
+This encoding preserves lexicographic key ordering, enabling key-range scans.
+Entries for the same key are ordered by sequence number.
+
+## Record types
+
+| Record type | Description |
+| --- | --- |
+| **LogEntry** | Stores the user's `(key, value)` pairs, ordered by segment and sequence number |
+| **SeqBlock** | Tracks sequence number block allocations for crash recovery (singleton record) |
+| **SegmentMeta** | Stores metadata for each segment including its start sequence and creation time |
+| **ListingEntry** | Tracks which keys are present in each segment, enabling key discovery without scanning the full log |
+
+### Segments
+
+A segment is a logical boundary in the log's sequence space. Each segment
+represents a contiguous range of sequence numbers across the full keyspace.
+Segments are numbered starting from 0 and increment monotonically.
+
+The segment ID is encoded directly into every `LogEntry` key, which means
+SlateDB physically clusters records from the same segment together on disk.
+This provides two key benefits:
+
+- **Efficient seeking**: queries targeting a specific time range can skip
+  segments outside that range without scanning the full log.
+- **Retention**: entire segments can be dropped when they age out, rather
+  than tracking expiration per key.
+
+New segments are created automatically based on a configurable time-based
+trigger (e.g. every hour). Each segment's `SegmentMeta` record stores
+its `start_seq` and `start_time_ms`, with end boundaries derived from the
+next segment's start values.
+
+### Listings
+
+The log entries provide no built-in way to discover which keys are present.
+Listing records solve this by tracking key presence per segment.
+
+When the writer encounters a key for the first time within a segment, it
+writes a `ListingEntry` record. Subsequent appends to the same key within
+that segment do not write additional listing records. When a new segment
+starts, tracking resets.
+
+This design ties key discovery to the segment lifecycle. When segments are
+deleted through retention, their listing records are removed as well, and
+keys that are no longer present in any remaining segment naturally fall out
+of scope.
+
+## Sequence numbers
+
+Sequence numbers are assigned from a single monotonically increasing counter
+maintained by the SlateDB writer. Each key's log entries are ordered by
+sequence number, but numbers are not contiguous. The only guarantee is that
+within a key's log, sequence numbers are strictly increasing.
+
+### Block-based allocation
+
+Rather than persisting the sequence number after every append, the writer
+pre-allocates blocks of sequence numbers and records the allocation in the
+LSM using a `SeqBlock` record. On crash recovery, the writer reads the last
+`SeqBlock` and allocates a fresh block starting after the previous range,
+skipping any unused numbers. This may create gaps in the sequence space but
+preserves monotonicity.
+
+## SST enhancements
+
+Log proposes two enhancements to SlateDB's SST structure:
+
+| Enhancement | Purpose |
+| --- | --- |
+| **Block record counts** | Each block entry in the SST index includes a cumulative record count, enabling range counting at the index level without reading every entry |
+| **Bloom filter granularity** | Bloom filters are keyed on the log key alone (not the composite key with sequence number), so they indicate whether a given log is present in an SST |
