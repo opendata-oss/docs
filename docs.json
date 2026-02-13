@@ -81,7 +81,8 @@
   },
   "logo": {
     "light": "/logo/light.svg",
-    "dark": "/logo/dark.svg"
+    "dark": "/logo/dark.svg",
+    "href": "https://opendata.dev"
   },
   "navbar": {
     "links": [
@@ -96,6 +97,11 @@
     ]
   },
   "css": "/global.css",
+  "seo": {
+    "metatags": {
+      "og:image": "/images/opengraph.png"
+    }
+  },
   "footer": {
     "socials": {
       "github": "https://github.com/opendata-oss/opendata",
