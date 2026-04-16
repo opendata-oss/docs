@@ -79,6 +79,12 @@ Since WAL files are flushed frequently on a configurable interval, the
 buffered mode still provides durability within a bounded time window. Choosing
 the right level depends on the use case.
 
+A third option decouples durability from the writer entirely: clients can
+write into an object-storage queue, and the main writer drains that queue
+asynchronously. The write returns as soon as the batch is durable in object
+storage, so ingest keeps working across writer restarts or failovers. See
+[Stateless Ingest](/timeseries/ingest) for the Timeseries implementation.
+
 ### Backpressure & Flow Control
 
 When writes arrive faster than Deltas can be flushed to object storage, the

@@ -71,6 +71,12 @@ from within the region they are produced and then transferred to the single
 writer over S3.  This both avoids the cross-zone data transfer costs and only
 depends on the availability of S3.
 
+<Note>
+  Timeseries implements this pattern for OpenTelemetry metrics via the
+  `opendata` OTel Collector exporter and an in-server ingest consumer. See
+  [Stateless Ingest](/timeseries/ingest) for the write path.
+</Note>
+
 <pre className="ascii-art">{`
 ┌─────────────────────────────────────────────────────────────────────┐
 │▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒ stateless zonal ingestion ▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒│

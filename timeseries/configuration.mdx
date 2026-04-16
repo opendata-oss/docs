@@ -47,6 +47,12 @@ storage:
 
 # How often (in seconds) to flush data from memory to durable storage.
 [ flush_interval_secs: <int> | default = 5 ]
+
+# Startup cache warmer (enabled by default).
+[ cache_warmer: <cache_warmer_config> ]
+
+# Durable ingest consumer. See the Stateless Ingest page for the full write path.
+[ ingest_consumer: <ingest_consumer_config> ]
 ```
 
 ### `<scrape_config>`
@@ -113,12 +119,53 @@ type: <string> # One of: InMemory, SlateDb
       # in the working directory and merges any SLATEDB_-prefixed environment variables.
       [ settings_path: <string> ]
 
+      # Block cache (optional). See <block_cache_config> below.
+      [ block_cache: <block_cache_config> ]
+
       # Object store provider configuration (required).
       object_store:
         <object_store_config>
     ```
   </Tab>
 </Tabs>
+
+### `<block_cache_config>`
+
+The block cache sits in front of SlateDB and holds decoded SST blocks. It is
+tagged by `type`. Only `FoyerHybrid` is currently available.
+
+```yaml
+block_cache:
+  type: FoyerHybrid
+
+  # In-memory tier capacity in bytes.
+  memory_capacity: <int>
+
+  # On-disk tier capacity in bytes.
+  disk_capacity: <int>
+
+  # Directory for the on-disk tier.
+  disk_path: <string>
+
+  # When entries are promoted to the disk tier.
+  # WriteOnInsertion persists every cached block; WriteOnEviction
+  # only persists on memory eviction.
+  [ write_policy: <string> | default = WriteOnInsertion ]
+
+  # Flush thread count for the disk engine.
+  [ flushers: <int> | default = 4 ]
+
+  # Flush-pipeline buffer pool size in bytes. Actual allocation is ~2x
+  # this value (flushers double-buffer). Defaults to memory_capacity / 32.
+  [ buffer_pool_size: <int> ]
+
+  # Write-queue size threshold in bytes. Entries beyond this are dropped
+  # rather than blocking the cache.
+  [ submit_queue_size_threshold: <int> | default = 1073741824 ]
+```
+
+See the [production guide](/timeseries/production#block-cache) for recommended
+sizes.
 
 ### `<object_store_config>`
 
@@ -150,6 +197,49 @@ The object store is tagged by `type`.
     ```
   </Tab>
 </Tabs>
+
+### `<cache_warmer_config>`
+
+On startup, the server scans recent time bucket key ranges through the storage
+reader. The block cache picks up those blocks as a side effect, so the first
+queries after a restart do not pay cold-cache latency. The warmer runs once
+and exits.
+
+Enabled by default. Set `cache_warmer: null` to disable.
+
+```yaml
+cache_warmer:
+  # How far back to scan on startup.
+  [ warm_range: <duration> | default = 24h ]
+
+  # Whether to warm raw sample data in addition to index metadata.
+  [ include_samples: <bool> | default = true ]
+```
+
+Disable the warmer when starting read-only replicas that only serve recent
+queries, where the up-front scan cost outweighs the benefit.
+
+### `<ingest_consumer_config>`
+
+Enables the durable-queue write path. See the
+[Stateless Ingest page](/timeseries/ingest) for the full architecture, the
+OpenTelemetry Collector side, and operational guidance.
+
+```yaml
+ingest_consumer:
+  # Object store holding the ingest queue. May differ from the TSDB's
+  # storage bucket.
+  object_store:
+    <object_store_config>
+
+  # Must match the manifest path configured on the producer side.
+  [ manifest_path: <string> | default = "ingest/manifest" ]
+
+  # Delay between polls when the queue is empty.
+  [ poll_interval: <duration> | default = 1s ]
+```
+
+Requires read-write mode. When absent, no consumer starts.
 
 ## Examples
 

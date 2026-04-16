@@ -29,6 +29,7 @@
           "timeseries/quickstart",
           "timeseries/storage-design",
           "timeseries/configuration",
+          "timeseries/ingest",
           "timeseries/production",
           {
             "group": "API reference",

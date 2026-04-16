@@ -43,7 +43,7 @@ these files under `charts/opendata-timeseries/`.
 ```yaml values.yaml
 image:
   repository: ghcr.io/opendata-oss/timeseries
-  tag: "0.1.8"
+  tag: "0.2.0"
 
 port: 9090
 
@@ -282,6 +282,57 @@ from S3. For production workloads, use an SSD-backed StorageClass:
   Avoid using HDD-backed volumes (e.g. `st1`, `sc1`) for the cache. SlateDB
   issues many small random reads, and spinning disks will bottleneck performance.
 </Warning>
+
+### Block cache
+
+On top of SlateDB's disk cache, Timeseries can keep decoded blocks in a
+hybrid memory-plus-disk block cache backed by [foyer](https://foyer.rs). Add
+it under `storage` in `prometheus.yaml`:
+
+```yaml prometheus.yaml
+storage:
+  type: SlateDb
+  path: timeseries
+  object_store:
+    type: Aws
+    region: us-west-2
+    bucket: my-timeseries-bucket
+  block_cache:
+    type: FoyerHybrid
+    memory_capacity: 8589934592    # 8 GiB
+    disk_capacity: 107374182400    # 100 GiB
+    disk_path: /cache/foyer
+    write_policy: WriteOnInsertion
+    flushers: 4
+```
+
+Sizing guidance:
+
+- Set `memory_capacity` to roughly the recent working set (the last few hours
+  of bucket index and sample data).
+- Point `disk_path` at the same SSD-backed PVC used by the disk cache; the
+  two workloads coexist.
+- Keep `write_policy: WriteOnInsertion` so every cached block is also on disk.
+  Restarts then hit the disk tier instead of re-reading from S3.
+- Raise `flushers` if the `foyer_*` write-queue metrics show backpressure.
+
+See [`<block_cache_config>`](/timeseries/configuration#block_cache_config) for
+the full field reference.
+
+### Cache warmer
+
+On startup the server scans recent time bucket key ranges through the storage
+reader, which populates the block cache. Queries that hit in the first few
+seconds after a restart avoid a cold-cache penalty. This is on by default and
+covers the last 24 hours including sample data. To tune or disable it, see
+[`<cache_warmer_config>`](/timeseries/configuration#cache_warmer_config).
+
+### Durable OTLP ingest
+
+For high-volume OTel metrics, run the [stateless ingest](/timeseries/ingest)
+path instead of (or alongside) direct OTLP/HTTP writes. Producers keep writing
+during TSDB restarts, writes stay inside the AZ, and a crashed consumer
+resumes from the last acked batch on its own.
 
 ### Health checks
 

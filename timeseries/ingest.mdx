@@ -1,0 +1,233 @@
+---
+title: Stateless Ingest
+description: Durable OTLP ingest for Timeseries via an object-storage queue
+---
+
+Timeseries can accept OpenTelemetry metrics through a durable queue in object
+storage instead of (or in addition to) the direct OTLP/HTTP endpoint. An
+[OpenTelemetry Collector](https://opentelemetry.io/docs/collector/) with the
+`opendata` exporter writes batches into the queue, and a background consumer
+inside the Timeseries server drains them into the TSDB.
+
+This is the [stateless zonal ingestion](/overview/architecture#stateless-zonal-ingestion)
+pattern applied to metrics.
+
+## Why use it
+
+The direct OTLP/HTTP endpoint couples ingest availability to TSDB availability.
+If the server is down or crashes before it has flushed an accepted request, the
+metrics are lost. Routing writes through object storage changes that:
+
+- Producers keep writing even when the TSDB is unavailable.
+- A crashed consumer resumes from the last acked batch.
+- Traffic stays within the AZ, avoiding cross-zone transfer fees that add up
+  at high metric volumes.
+
+The tradeoff is end-to-end latency: a metric is not queryable until the
+collector flushes its batch and the consumer reads, decodes, and writes it. For
+monitoring workloads this is acceptable; for sub-second freshness, use the
+direct OTLP/HTTP endpoint.
+
+## Architecture
+
+```
+    ┌────────────────┐
+    │ OTel SDK / App │
+    └────────┬───────┘
+             │
+    ╔════════▼══════════════╗
+    ║ OTel Collector        ║
+    ║                       ║         ┌────────────────────┐
+    ║ ┌───────────────────┐ ║         │   Object Storage   │
+    ║ │     Receiver      │ ║   ┌─────▶ (data + manifest)  │
+    ║ └───────────────────┘ ║   │     │                    │
+    ║                       ║   │     └──────────┬─────────┘
+    ║ ┌───────────────────┐ ║   │                │
+    ║ │ opendata exporter ├─╫───┘                │
+    ║ └───────────────────┘ ║                    │
+    ╚═══════════════════════╝                    │
+                                                 │
+                             ╔═══════════════════▼═════════════╗
+                             ║ Timeseries Server               ║
+                             ║                                 ║
+                             ║ ┌─────────────────────────────┐ ║
+                             ║ │ IngestConsumer              │ ║
+                             ║ │   poll manifest             │ ║
+                             ║ │   decode OTLP protobuf      │ ║
+                             ║ │   convert + write to TSDB   │ ║
+                             ║ └─────────────────────────────┘ ║
+                             ╚═════════════════════════════════╝
+```
+
+Both paths converge on the same OTLP-to-Prometheus conversion and TSDB write,
+so semantics match exactly. You can run both at once if some pipelines need
+immediate writes and others tolerate queue latency.
+
+## Collector side
+
+The `opendata` exporter lives in the
+[`opendata-go`](https://github.com/opendata-oss/opendata-go) repository and is
+distributed as a standalone OTel Collector component. Build a custom collector
+with the [OpenTelemetry Collector Builder](https://github.com/open-telemetry/opentelemetry-collector/tree/main/cmd/builder).
+
+### Builder config
+
+```yaml builder-config.yaml
+dist:
+  name: opendata-otelcol
+  description: OpenTelemetry Collector with OpenData exporter support
+  output_path: ./_build
+  otelcol_version: 0.149.0
+
+receivers:
+  - gomod: go.opentelemetry.io/collector/receiver/otlpreceiver v0.149.0
+  - gomod: github.com/open-telemetry/opentelemetry-collector-contrib/receiver/prometheusreceiver v0.149.0
+
+processors:
+  - gomod: go.opentelemetry.io/collector/processor/batchprocessor v0.149.0
+
+exporters:
+  - gomod: go.opentelemetry.io/collector/exporter/otlphttpexporter v0.149.0
+  - gomod: github.com/opendata-oss/opendata-go/exporter/opendataexporter v0.2.0
+```
+
+Build and run:
+
+```bash
+go install go.opentelemetry.io/collector/cmd/builder@v0.149.0
+builder --config builder-config.yaml
+./_build/opendata-otelcol --config collector-config.yaml
+```
+
+Or build a container image from the same builder config:
+
+```dockerfile Dockerfile
+FROM golang:1.26.1 AS builder
+ARG OCB_VERSION=0.149.0
+WORKDIR /src
+RUN go install go.opentelemetry.io/collector/cmd/builder@v${OCB_VERSION}
+COPY builder-config.yaml /src/builder-config.yaml
+RUN builder --config /src/builder-config.yaml
+
+FROM gcr.io/distroless/base-debian12
+COPY --from=builder /src/_build/opendata-otelcol /otelcol-custom
+ENTRYPOINT ["/otelcol-custom"]
+```
+
+### Exporter config
+
+```yaml collector-config.yaml
+exporters:
+  opendata:
+    object_store:
+      type: s3
+      bucket: my-ingest-bucket
+      region: us-west-2
+    data_path_prefix: ingest/otel/metrics/data
+    manifest_path: ingest/otel/metrics/manifest
+    flush_interval: 10s
+    flush_size_bytes: 1048576
+    compression: zstd
+
+service:
+  pipelines:
+    metrics:
+      receivers: [otlp]
+      processors: [batch]
+      exporters: [opendata]
+```
+
+| Field | Description |
+| --- | --- |
+| `object_store` | Bucket where batches and the manifest are written. Must match the consumer's `object_store`. |
+| `data_path_prefix` | Path prefix for batch objects. |
+| `manifest_path` | Path to the queue manifest. The consumer reads the same path. |
+| `flush_interval` | Maximum time a batch is held before flushing. |
+| `flush_size_bytes` | Size threshold that triggers a flush. |
+| `compression` | `none` or `zstd`. Zstd uses level 3. |
+
+Each `ConsumeMetrics` call marshals the OTLP protobuf, writes it as one entry
+with a 4-byte metadata header identifying it as metrics, and awaits durable
+confirmation from object storage before returning to the pipeline. That means a
+batch processor upstream is the right place to trade off request rate against
+flush rate.
+
+## Consumer side
+
+Turn on the consumer by adding `ingest_consumer` to `prometheus.yaml`:
+
+```yaml prometheus.yaml
+ingest_consumer:
+  object_store:
+    type: S3
+    region: us-west-2
+    bucket: my-ingest-bucket
+  manifest_path: ingest/otel/metrics/manifest
+  poll_interval: 1s
+```
+
+The consumer runs as a background task inside the Timeseries server. It
+requires read-write mode and only starts when this section is present. The
+object store does not have to be the same bucket the TSDB uses; the queue is a
+separate buffer.
+
+| Field | Default | Description |
+| --- | --- | --- |
+| `object_store` | required | Bucket holding the queue. |
+| `manifest_path` | `ingest/manifest` | Must match the exporter's `manifest_path`. |
+| `poll_interval` | `1s` | Delay between polls when the queue is empty. |
+
+On startup the consumer fences any previous consumer via the manifest's
+epoch-based compare-and-set, then begins polling. On shutdown it flushes
+pending acks before releasing the object store.
+
+## Batch format
+
+Batches are self-describing. Each file contains a record block (optionally
+compressed) followed by a 7-byte footer that indicates the compression type,
+record count, and format version. The consumer reads the footer, decompresses
+the record block if needed, and parses the length-prefixed entries.
+
+See [RFC 0001](https://github.com/opendata-oss/opendata/blob/main/ingest/rfcs/0001-stateless-ingest.md)
+for the wire format and
+[RFC 0006](https://github.com/opendata-oss/opendata/blob/main/timeseries/rfcs/0006-ingest-consumer.md)
+for the 4-byte metadata header that tells the consumer a batch holds OTLP
+metrics.
+
+## Delivery semantics
+
+At-least-once. If the consumer crashes between processing a batch and acking
+it, the batch is re-read on restart. Duplicate writes to the TSDB are
+idempotent: samples are keyed by `(series, timestamp)`, so a replay overwrites
+with the same value.
+
+## Observability
+
+The consumer publishes metrics under the `opendata_ingest_consumer_` prefix on
+the Timeseries `/metrics` endpoint.
+
+| Metric | Type | Description |
+| --- | --- | --- |
+| `..._batches_processed_total` | counter | Batches drained from the queue. |
+| `..._entries_processed_total` | counter | OTLP entries decoded successfully. |
+| `..._entries_skipped_total` | counter | Entries skipped due to decode or conversion errors. |
+| `..._series_ingested_total` | counter | Series written to the TSDB. |
+| `..._batch_processing_duration_seconds` | histogram | Per-batch processing latency. |
+| `..._poll_empty_total` | counter | Polls that returned no work. |
+
+A queue that is growing without `batches_processed_total` keeping up means the
+consumer is falling behind. Check TSDB write latency and consider reducing
+`flush_interval` on the exporter side (smaller, more frequent batches reduce
+per-batch variance) or raising the consumer's CPU budget.
+
+## Running both paths
+
+`ingest_consumer` and the OTLP/HTTP endpoint coexist. A common setup is:
+
+- Route high-volume, lossy-tolerant OTel traffic through the queue.
+- Keep the direct endpoint for low-latency writes (scrapers, remote-write
+  senders, local agents).
+
+Both paths use the same converter and write through `TimeSeriesDb::write`, so
+there is no semantic difference between a metric that arrived via the queue
+and one that arrived over HTTP.
