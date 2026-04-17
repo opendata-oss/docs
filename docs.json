@@ -123,5 +123,10 @@
       "github": "https://github.com/opendata-oss/opendata",
       "discord": "https://discord.gg/CsAQJ2AJGU"
     }
+  },
+  "integrations": {
+    "gtm": {
+        "tagId": "G-14QSSZ6YVK"
+    }
   }
 }
