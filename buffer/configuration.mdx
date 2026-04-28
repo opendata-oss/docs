@@ -1,25 +1,25 @@
 ---
 title: Configuration
-description: Configure object storage, batching, and garbage collection for Ingest
+description: Configure object storage, batching, and garbage collection for Buffer
 ---
 
-Ingest is a Rust library. Configuration is expressed as plain Rust structs
-that the host service constructs and hands to the `Ingestor` and
-`Collector` APIs. Two top-level structs govern the write and read sides:
-`IngestorConfig` and `CollectorConfig`. Both share the same
+Buffer is a Rust library. Configuration is expressed as plain Rust structs
+that the host service constructs and hands to the `Producer` and `Consumer`
+APIs. Two top-level structs govern the write and read sides:
+`ProducerConfig` and `ConsumerConfig`. Both share the same
 `ObjectStoreConfig` from the `common` crate.
 
 The structs derive `Serialize`/`Deserialize` so host services *may* embed
 them in their own config formats, but the canonical surface documented
 here is the Rust API.
 
-## `IngestorConfig`
+## `ProducerConfig`
 
 Controls where data batches and the queue manifest are written, how often
 batches are flushed, and when backpressure is applied.
 
 ```rust
-pub struct IngestorConfig {
+pub struct ProducerConfig {
     /// Object store provider. Determines where data batches and the
     /// queue manifest are persisted.
     pub object_store: ObjectStoreConfig,
@@ -55,23 +55,23 @@ pub struct IngestorConfig {
 }
 ```
 
-## `CollectorConfig`
+## `ConsumerConfig`
 
 Controls where the queue manifest and data batches are read from, and
 how stale batches are garbage collected.
 
 ```rust
-pub struct CollectorConfig {
+pub struct ConsumerConfig {
     /// Object store provider. Must point at the same bucket or directory
-    /// as the paired ingestor.
+    /// as the paired producer.
     pub object_store: ObjectStoreConfig,
 
     /// Path to the queue manifest in object storage. Must match the
-    /// ingestor's `manifest_path`.
+    /// producer's `manifest_path`.
     /// Default: "ingest/manifest"
     pub manifest_path: String,
 
-    /// Path prefix for data batch objects. Must match the ingestor's
+    /// Path prefix for data batch objects. Must match the producer's
     /// `data_path_prefix`.
     /// Default: "ingest"
     pub data_path_prefix: String,
@@ -87,8 +87,8 @@ pub struct CollectorConfig {
 }
 ```
 
-The grace period prevents the collector from deleting batches that an
-ingestor has just written but not yet enqueued in the manifest.
+The grace period prevents the consumer from deleting batches that a
+producer has just written but not yet enqueued in the manifest.
 
 ## `ObjectStoreConfig`
 
@@ -129,9 +129,9 @@ pub enum CompressionType {
 }
 ```
 
-## Pairing Ingestors and Collectors
+## Pairing producers and consumers
 
-An ingestor and the collector that drains it must agree on three values:
+A producer and the consumer that drains it must agree on three values:
 
 - **`object_store`** must point at the same bucket or directory.
 - **`manifest_path`** must be identical, since it identifies the queue.
@@ -139,7 +139,7 @@ An ingestor and the collector that drains it must agree on three values:
   batch locations relative to it.
 
 A mismatch on any of these silently routes traffic to a different queue
-or causes the collector to fail to fetch batches it sees in the manifest.
+or causes the consumer to fail to fetch batches it sees in the manifest.
 
 ## Examples
 
@@ -148,14 +148,13 @@ or causes the collector to fail to fetch batches it sees in the manifest.
     ```rust
     use std::time::Duration;
     use common::{ObjectStoreConfig, LocalObjectStoreConfig};
-    use ingest::{IngestorConfig, CollectorConfig};
-    use ingest::model::CompressionType;
+    use buffer::{ProducerConfig, ConsumerConfig, CompressionType};
 
     let object_store = ObjectStoreConfig::Local(LocalObjectStoreConfig {
         path: "./data".to_string(),
     });
 
-    let ingestor_config = IngestorConfig {
+    let producer_config = ProducerConfig {
         object_store: object_store.clone(),
         data_path_prefix: "ingest".to_string(),
         manifest_path: "ingest/manifest".to_string(),
@@ -165,7 +164,7 @@ or causes the collector to fail to fetch batches it sees in the manifest.
         batch_compression: CompressionType::None,
     };
 
-    let collector_config = CollectorConfig {
+    let consumer_config = ConsumerConfig {
         object_store,
         manifest_path: "ingest/manifest".to_string(),
         data_path_prefix: "ingest".to_string(),
@@ -178,15 +177,14 @@ or causes the collector to fail to fetch batches it sees in the manifest.
     ```rust
     use std::time::Duration;
     use common::{ObjectStoreConfig, AwsObjectStoreConfig};
-    use ingest::{IngestorConfig, CollectorConfig};
-    use ingest::model::CompressionType;
+    use buffer::{ProducerConfig, ConsumerConfig, CompressionType};
 
     let object_store = ObjectStoreConfig::Aws(AwsObjectStoreConfig {
         region: "us-west-2".to_string(),
         bucket: "my-ingest-bucket".to_string(),
     });
 
-    let ingestor_config = IngestorConfig {
+    let producer_config = ProducerConfig {
         object_store: object_store.clone(),
         data_path_prefix: "ingest".to_string(),
         manifest_path: "ingest/manifest".to_string(),
@@ -196,7 +194,7 @@ or causes the collector to fail to fetch batches it sees in the manifest.
         batch_compression: CompressionType::Zstd,
     };
 
-    let collector_config = CollectorConfig {
+    let consumer_config = ConsumerConfig {
         object_store,
         manifest_path: "ingest/manifest".to_string(),
         data_path_prefix: "ingest".to_string(),
@@ -209,10 +207,9 @@ or causes the collector to fail to fetch batches it sees in the manifest.
     ```rust
     use std::time::Duration;
     use common::ObjectStoreConfig;
-    use ingest::{IngestorConfig, CollectorConfig};
-    use ingest::model::CompressionType;
+    use buffer::{ProducerConfig, ConsumerConfig, CompressionType};
 
-    let ingestor_config = IngestorConfig {
+    let producer_config = ProducerConfig {
         object_store: ObjectStoreConfig::InMemory,
         data_path_prefix: "ingest".to_string(),
         manifest_path: "ingest/manifest".to_string(),
@@ -222,7 +219,7 @@ or causes the collector to fail to fetch batches it sees in the manifest.
         batch_compression: CompressionType::None,
     };
 
-    let collector_config = CollectorConfig {
+    let consumer_config = ConsumerConfig {
         object_store: ObjectStoreConfig::InMemory,
         manifest_path: "ingest/manifest".to_string(),
         data_path_prefix: "ingest".to_string(),

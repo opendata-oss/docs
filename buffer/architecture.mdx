@@ -1,22 +1,22 @@
 ---
 title: Architecture
-description: How Ingest works
+description: How Buffer works
 ---
 
-Ingest is a library with two main components: **multiple ingestors** and **a single
-collector**. Ingestors and the collector communicate exclusively through a
-queue manifest in object storage — there is no direct network path between
-them and no stateful broker to operate.
+Buffer is a library with two main components: **multiple producers** and
+**a single consumer**. Producers and the consumer communicate exclusively
+through a queue manifest in object storage — there is no direct network path
+between them and no stateful broker to operate.
 
 <pre className="ascii-art">{`
 ┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
-┃▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒ ingest architecture ▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒┃
+┃▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒ buffer architecture ▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒┃
 ┣━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┫
 ┃                                                                       ┃
-┃    ╔═Ingestors══════════════════════════════════════════════════╗     ┃
+┃    ╔═Producers══════════════════════════════════════════════════╗     ┃
 ┃    ║                                                            ║░    ┃
 ┃    ║  ┌──────────────┐    ┌──────────────┐    ┌──────────────┐  ║░    ┃
-┃    ║  │  Ingestor 1  │    │  Ingestor 2  │    │  Ingestor N  │  ║░    ┃
+┃    ║  │  Producer 1  │    │  Producer 2  │    │  Producer N  │  ║░    ┃
 ┃    ║  │  q-producer  │    │  q-producer  │    │  q-producer  │  ║░    ┃
 ┃    ║  └───────┬──────┘    └──────────────┘    └───────┬──────┘  ║░    ┃
 ┃    ║          │                                       │         ║░    ┃
@@ -47,7 +47,7 @@ them and no stateful broker to operate.
 ┃           ╔═Writer═╪════════╪═════════╗                               ┃
 ┃           ║        │        │         ║░                              ┃
 ┃           ║        │┌───────┴──────┐  ║░     ╔════════════════╗       ┃
-┃           ║        ││  Collector   │  ║░     ║                ║       ┃
+┃           ║        ││   Consumer   │  ║░     ║                ║       ┃
 ┃           ║        └▶  q-consumer  ├──write──▶    Database    ║       ┃
 ┃           ║         └──────────────┘  ║░     ║                ║       ┃
 ┃           ║                           ║░     ╚════════════════╝       ┃
@@ -57,14 +57,14 @@ them and no stateful broker to operate.
 ┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛
 `}</pre>
 
-## Ingestors
+## Producers
 
-Ingestors accept arbitrary byte entries from callers, buffer them in
+Producers accept arbitrary byte entries from callers, buffer them in
 memory, and periodically flush them as binary data batches to object
-storage. Each ingestor exposes a minimal API:
+storage. Each producer exposes a minimal API:
 
 ```rust
-pub async fn ingest(
+pub async fn produce(
     &self,
     entries: Vec<Bytes>,
     metadata: Bytes,
@@ -75,14 +75,14 @@ Flushes are triggered either by elapsed time (default: 100 ms) or by batch
 size (default: 64 MiB). Data batches are binary and optionally compressed.
 Each batch is named with a [ULID](https://github.com/ulid/spec), which
 encodes a millisecond-precision timestamp. Once a batch is flushed,
-ingestors append its location and metadata to the queue.
+producers append its location and metadata to the queue.
 
 The queue is a single binary manifest in object storage that tracks the
-locations and metadata of data batches in append order. Ingestors interact
+locations and metadata of data batches in append order. Producers interact
 with it through a queue producer, which uses compare-and-swap (CAS) writes
-to ensure that concurrent ingestors do not overwrite each other's entries:
+to ensure that concurrent producers do not overwrite each other's entries:
 an append succeeds only if the manifest has not been modified since it was
-read. On conflict, the producer re-reads the manifest and retries.
+read. On conflict, the queue producer re-reads the manifest and retries.
 Additionally, the queue producer assigns consecutive sequence numbers to
 queue entries.
 
@@ -106,21 +106,21 @@ The manifest format is designed for append efficiency. Existing entries
 are never deserialized during append, so appending a new entry is O(1) in
 the length of the queue.
 
-The `WriteHandle` returned by `ingest()` contains a `DurabilityWatcher`.
+The `WriteHandle` returned by `produce()` contains a `DurabilityWatcher`.
 Callers can `await_durable()` to block until the entries have been
 persisted to object storage and enqueued in the manifest. This avoids data
 loss during failover, but it does not provide read-your-own-writes
 consistency — durability refers to the data batch, not to the database
 write.
 
-## Collector
+## Consumer
 
-The collector is the read-side counterpart to the ingestors. It iterates
-over ingested data batches in object storage and delivers them to the
-database in the order recorded in the queue:
+The consumer is the read-side counterpart to the producers. It iterates
+over data batches in object storage and delivers them to the database in
+the order recorded in the queue:
 
 ```rust
-pub async fn next_batch(&mut self) -> Result<Option<CollectedBatch>>
+pub async fn next_batch(&mut self) -> Result<Option<ConsumedBatch>>
 pub async fn ack(&mut self, sequence: u64) -> Result<()>
 ```
 
@@ -133,29 +133,30 @@ progress. Acknowledgements must be in order: acknowledging a sequence
 number that is not immediately after the last one is rejected, ensuring
 that no batch is silently skipped.
 
-While multiple ingestors can write to a queue manifest, only one collector
+While multiple producers can write to a queue manifest, only one consumer
 can read from it. This matches OpenData's single-writer paradigm and
-prevents zombie collectors — surviving after an infrastructure failure —
+prevents zombie consumers — surviving after an infrastructure failure —
 from acknowledging batches and making them invisible to the active
-collector. Single-collector exclusivity is enforced by an epoch stored in
-the queue manifest: when a collector starts, it reads the epoch,
+consumer. Single-consumer exclusivity is enforced by an epoch stored in
+the queue manifest: when a consumer starts, it reads the epoch,
 increments it, and writes it back. Reads with a stale epoch are rejected,
-so any zombie collector is fenced as soon as a new one takes over.
+so any zombie consumer is fenced as soon as a new one takes over.
 
-The collector is also responsible for cleaning up processed data batches.
+The consumer is also responsible for cleaning up processed data batches.
 At startup and every 100 acknowledged batches, all entries for
 acknowledged batches are dequeued from the manifest. A dedicated garbage
 collector task then deletes the corresponding data batches from object
 storage.
 
-The collector API supports exactly-once delivery. To achieve it, the
+The consumer API supports exactly-once delivery. To achieve it, the
 writer atomically persists the batch data and the sequence number from
 `next_batch()` to the database. If the atomic write succeeds but a failure
-occurs before `ack()` returns, a new writer can read the last persisted
-sequence number from the database and initialize the collector to resume
-right after it. The new collector also bumps the epoch, fencing the old
-one and preventing any duplicate writes.
+occurs before `ack()` returns, a new writer can construct a new consumer
+with that last persisted sequence number so it resumes right after it. The
+new consumer also bumps the epoch, fencing the old one and preventing any
+duplicate writes.
 
 ## Usage example
 
-For example how Ingest can be integrated into an ingestion pipeline see [ingest into Timeseries](/timeseries/ingest).
+For an example of how Buffer can be integrated into an ingestion pipeline see
+[ingest into Timeseries](/timeseries/ingest).

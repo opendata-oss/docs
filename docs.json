@@ -94,12 +94,12 @@
         ]
       },
       {
-        "group": "Ingest",
+        "group": "Buffer",
         "icon": "right-to-bracket",
         "pages": [
-          "ingest/index",
-          "ingest/architecture",
-          "ingest/configuration"
+          "buffer/index",
+          "buffer/architecture",
+          "buffer/configuration"
         ]
       }
     ]

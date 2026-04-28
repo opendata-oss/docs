@@ -1,0 +1,24 @@
+---
+title: Buffer
+description: Highly-available ingestion buffer on object storage
+---
+
+Buffer is a stateless write-path library that uses object storage as a durable
+queue between producers and a database. Producers accept opaque byte entries,
+batch them, and flush them to object storage. A single binary manifest in
+object storage coordinates producers and consumers using queue semantics.
+Because the data and the manifest live in object storage, Buffer is stateless
+and horizontally scalable. Object storage takes care of durability and
+availability.
+
+<CardGroup cols={2}>
+  <Card title="Architecture" icon="sitemap" href="buffer/architecture">
+    How Buffer works by leveraging object storage
+  </Card>
+  <Card title="Configuration" icon="gear" href="buffer/configuration">
+    How to configure producers and consumers
+  </Card>
+  <Card title="GitHub" icon="github" href="https://github.com/opendata-oss/opendata/tree/main/buffer">
+    View the source code, open issues, and contribute
+  </Card>
+</CardGroup>

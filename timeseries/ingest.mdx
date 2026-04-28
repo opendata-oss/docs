@@ -10,7 +10,8 @@ storage instead of (or in addition to) the direct OTLP/HTTP endpoint. An
 inside the Timeseries server drains them into the TSDB.
 
 This is the [stateless zonal ingestion](/overview/architecture#stateless-zonal-ingestion)
-pattern enabled by [`opendata` Ingest](/ingest/index) applied to metrics.
+pattern enabled by the [`opendata` Buffer](/buffer/index) library applied to
+metrics.
 
 ## Why use it
 
@@ -56,7 +57,7 @@ direct OTLP/HTTP endpoint.
 │                            ║ Timeseries Server               ║▒             │
 │                            ║                                 ║▒             │
 │                            ║ ┌─────────────────────────────┐ ║▒             │
-│                            ║ │ IngestConsumer              │ ║▒             │
+│                            ║ │ BufferConsumer              │ ║▒             │
 │                            ║ │   poll manifest             │ ║▒             │
 │                            ║ │   decode OTLP protobuf      │ ║▒             │
 │                            ║ │   convert + write to TSDB   │ ║▒             │
@@ -96,7 +97,7 @@ processors:
 
 exporters:
   - gomod: go.opentelemetry.io/collector/exporter/otlphttpexporter v0.149.0
-  - gomod: github.com/opendata-oss/opendata-go/exporter/opendataexporter v0.2.0
+  - gomod: github.com/opendata-oss/opendata-go/exporter/opendataexporter v0.3.0
 ```
 
 Build and run:
@@ -162,10 +163,10 @@ flush rate.
 
 ## Consumer side
 
-Turn on the consumer by adding `ingest_consumer` to `prometheus.yaml`:
+Turn on the consumer by adding `buffer_consumer` to `prometheus.yaml`:
 
 ```yaml prometheus.yaml
-ingest_consumer:
+buffer_consumer:
   object_store:
     type: S3
     region: us-west-2
@@ -196,9 +197,9 @@ compressed) followed by a 7-byte footer that indicates the compression type,
 record count, and format version. The consumer reads the footer, decompresses
 the record block if needed, and parses the length-prefixed entries.
 
-See [RFC 0001](https://github.com/opendata-oss/opendata/blob/main/ingest/rfcs/0001-stateless-ingest.md)
+See [RFC 0001](https://github.com/opendata-oss/opendata/blob/main/buffer/rfcs/0001-stateless-buffer.md)
 for the wire format and
-[RFC 0006](https://github.com/opendata-oss/opendata/blob/main/timeseries/rfcs/0006-ingest-consumer.md)
+[RFC 0006](https://github.com/opendata-oss/opendata/blob/main/timeseries/rfcs/0006-buffer-consumer.md)
 for the 4-byte metadata header that tells the consumer a batch holds OTLP
 metrics.
 
@@ -211,26 +212,33 @@ with the same value.
 
 ## Observability
 
-The consumer publishes metrics under the `opendata_ingest_consumer_` prefix on
-the Timeseries `/metrics` endpoint.
+The consumer publishes metrics under the `buffer_` prefix on the Timeseries
+`/metrics` endpoint.
 
 | Metric | Type | Description |
 | --- | --- | --- |
-| `..._batches_processed_total` | counter | Batches drained from the queue. |
-| `..._entries_processed_total` | counter | OTLP entries decoded successfully. |
-| `..._entries_skipped_total` | counter | Entries skipped due to decode or conversion errors. |
-| `..._series_ingested_total` | counter | Series written to the TSDB. |
-| `..._batch_processing_duration_seconds` | histogram | Per-batch processing latency. |
-| `..._poll_empty_total` | counter | Polls that returned no work. |
+| `buffer_batches_collected` | counter | Batches fetched from object store. |
+| `buffer_entries_collected` | counter | Entries across collected batches. |
+| `buffer_bytes_collected` | counter | Bytes read from object store. |
+| `buffer_acks` | counter | Batch acks processed. |
+| `buffer_consumer_lag_seconds` | gauge | Wall clock minus last batch ingestion time. |
+| `buffer_queue_length` | gauge | Entries currently in the manifest queue. |
+| `buffer_fetch_duration_seconds` | histogram | Per-batch fetch latency from object store. |
+| `buffer_gc_files_deleted` | counter | Batch files cleaned by GC. |
+| `buffer_gc_files_failed` | counter | Failed GC file deletions. |
+| `buffer_gc_duration_seconds` | histogram | GC cycle wall time. |
+| `buffer_manifest_writes` | counter | Manifest write attempts (label `role`). |
+| `buffer_manifest_conflicts` | counter | Manifest CAS conflicts (label `role`). |
+| `tsdb_ingest_entries_skipped_total` | counter | Entries skipped due to decode or conversion errors. |
 
-A queue that is growing without `batches_processed_total` keeping up means the
+A growing `buffer_queue_length` without `buffer_acks` keeping up means the
 consumer is falling behind. Check TSDB write latency and consider reducing
 `flush_interval` on the exporter side (smaller, more frequent batches reduce
 per-batch variance) or raising the consumer's CPU budget.
 
 ## Running both paths
 
-`ingest_consumer` and the OTLP/HTTP endpoint coexist. A common setup is:
+`buffer_consumer` and the OTLP/HTTP endpoint coexist. A common setup is:
 
 - Route high-volume, lossy-tolerant OTel traffic through the queue.
 - Keep the direct endpoint for low-latency writes (scrapers, remote-write

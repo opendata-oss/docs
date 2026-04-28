@@ -51,8 +51,8 @@ storage:
 # Startup cache warmer (enabled by default).
 [ cache_warmer: <cache_warmer_config> ]
 
-# Durable ingest consumer. See the Stateless Ingest page for the full write path.
-[ ingest_consumer: <ingest_consumer_config> ]
+# Durable buffer consumer. See the Stateless Ingest page for the full write path.
+[ buffer_consumer: <buffer_consumer_config> ]
 ```
 
 ### `<scrape_config>`
@@ -219,15 +219,15 @@ cache_warmer:
 Disable the warmer when starting read-only replicas that only serve recent
 queries, where the up-front scan cost outweighs the benefit.
 
-### `<ingest_consumer_config>`
+### `<buffer_consumer_config>`
 
 Enables the durable-queue write path. See the
 [Stateless Ingest page](/timeseries/ingest) for the full architecture, the
 OpenTelemetry Collector side, and operational guidance.
 
 ```yaml
-ingest_consumer:
-  # Object store holding the ingest queue. May differ from the TSDB's
+buffer_consumer:
+  # Object store holding the buffer queue. May differ from the TSDB's
   # storage bucket.
   object_store:
     <object_store_config>
