@@ -80,6 +80,7 @@
             "openapi": "openapi/vector.yaml",
             "pages": [
               "POST /api/v1/vector/write",
+              "POST /api/v1/vector/delete",
               "POST /api/v1/vector/search",
               "GET /api/v1/vector/vectors/{id}"
             ]

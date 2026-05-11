@@ -66,6 +66,53 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
 
+  /api/v1/vector/delete:
+    post:
+      operationId: delete
+      summary: Delete vectors by ID
+      description: |
+        Delete one or more vectors from the collection by their user-provided
+        string IDs. IDs that do not exist are silently ignored.
+
+        Supports both binary protobuf (`application/protobuf`) and ProtoJSON
+        (`application/protobuf+json`) request bodies.
+      requestBody:
+        required: true
+        content:
+          application/protobuf+json:
+            schema:
+              $ref: "#/components/schemas/DeleteRequest"
+            example:
+              ids:
+                - "doc-1"
+                - "doc-2"
+          application/protobuf:
+            schema:
+              type: string
+              format: binary
+      responses:
+        "200":
+          description: Vectors deleted successfully.
+          content:
+            application/protobuf+json:
+              schema:
+                $ref: "#/components/schemas/DeleteVectorsResponse"
+              example:
+                status: success
+                vectorsDeleted: 2
+        "400":
+          description: Invalid input (malformed body, empty ID).
+          content:
+            application/protobuf+json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          description: Internal server error.
+          content:
+            application/protobuf+json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
   /api/v1/vector/search:
     post:
       operationId: search
@@ -255,6 +302,34 @@ components:
       required:
         - status
         - vectorsUpserted
+
+    DeleteRequest:
+      type: object
+      description: Request body for deleting vectors by ID.
+      properties:
+        ids:
+          type: array
+          items:
+            type: string
+            maxLength: 64
+          description: User-provided IDs of the vectors to delete (up to 64 bytes each).
+      required:
+        - ids
+
+    DeleteVectorsResponse:
+      type: object
+      description: Response after successfully deleting vectors.
+      properties:
+        status:
+          type: string
+          example: success
+        vectorsDeleted:
+          type: integer
+          format: int32
+          description: Number of vectors in the request. IDs that did not exist are still counted.
+      required:
+        - status
+        - vectorsDeleted
 
     ComparisonFilter:
       type: object
