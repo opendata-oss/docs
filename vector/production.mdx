@@ -3,4 +3,485 @@ title: Getting to Production
 description: Deploy, monitor, and secure Vector on Kubernetes with S3 storage
 ---
 
-<Warning>Documentation coming soon</Warning>
+This guide covers everything you need to run Vector in production on
+Kubernetes: a complete Helm chart, S3-backed storage with a local disk cache,
+health checks, monitoring, and security.
+
+## Deployment
+
+### Overview
+
+A basic production Vector deployment consists of a single replica that serves
+both writes and reads. Vector does not yet support partitioning, so you cannot
+scale the single writer/reader horizontally. The primary means of scaling is
+vertical scaling by allocating more cpu/memory/cache, which can take you pretty
+far. Since all data is persisted on S3, data in Vector is highly durable.
+
+So, a basic production deployment of Vector consists of:
+- A **single-replica Deployment** running the `opendata-vector` container
+- An **S3 bucket** for durable storage
+- A **PersistentVolumeClaim** for the SlateDB disk cache
+- A **ConfigMap** for Vector's configuration, S3 storage settings, and SlateDB
+  settings.
+- A **ServiceAccount** with an IAM role for S3 access (IRSA on EKS)
+- A **Service** for exposing Vector to other applications
+
+<Note>
+  Vector uses SlateDB's epoch-based fencing, which means only one writer can
+  hold the epoch lock at a time. The Deployment uses the `Recreate` strategy so
+  that the old pod is fully terminated before the new one starts — a
+  `RollingUpdate` creates the possibility for the new pod to be fenced by the old one and never
+  become ready.
+</Note>
+
+### Helm Chart
+
+Below is a complete Helm chart for deploying Vector. Create these files under
+`charts/opendata-vector`.
+
+#### `values.yaml`
+
+```yaml values.yaml
+image:
+  repository: ghcr.io/opendata-oss/vector
+  tag: latest
+
+containerPort: 8080
+
+command: []
+args: []
+
+resources:
+  requests:
+    cpu: "4"
+    memory: 8Gi
+  limits:
+    cpu: "4"
+    memory: 8Gi
+
+nodeSelector: {}
+tolerations: []
+affinity: {}
+
+# ---------------------------------------------------------------------------
+# AWS / SlateDB object store configuration.
+# ---------------------------------------------------------------------------
+aws:
+  region: us-west-2
+  bucket: my-vector-bucket 
+  prefix: vector
+
+# ---------------------------------------------------------------------------
+# Service account used by the vector pod. We rely on IRSA: the pod assumes the
+# IAM role specified in `serviceAccount.roleArn` via the EKS OIDC provider.
+# ---------------------------------------------------------------------------
+serviceAccount:
+  create: true
+  name: opendata-vector
+  # ARN of the IAM role (REQUIRED)
+  roleArn: my-iam-role-arn
+
+# ---------------------------------------------------------------------------
+# Disk cache for SlateDB (Foyer hybrid: memory + on-disk tier).
+#
+# The volume is mounted at `disk.mountPath` inside the container and Foyer is
+# pointed at it via the SlateDB `block_cache` config.
+# ---------------------------------------------------------------------------
+disk:
+  size: 100Gi
+  storageClass: gp3
+  mountPath: /var/cache/opendata-vector
+  # Bytes used for the on-disk cache tier. Leave room for filesystem overhead.
+  diskCapacityBytes: 96636764160 # 90 GiB
+  # Bytes used for the in-memory cache tier.
+  memoryCapacityBytes: 1073741824 # 4 GiB
+
+# ---------------------------------------------------------------------------
+# Service exposing the HTTP API. Defaults to ClusterIP — switch to LoadBalancer
+# if you want an external endpoint.
+# ---------------------------------------------------------------------------
+service:
+  type: ClusterIP
+  port: 8080
+  annotations: {}
+
+# ---------------------------------------------------------------------------
+# Vector configuration. These fields map onto the vector.yaml that is
+# rendered into the configmap and mounted at /config/vector.yaml.
+# ---------------------------------------------------------------------------
+vector:
+  dimensions: 2
+  distanceMetric: L2
+  flushInterval: 60
+  splitThresholdVectors: 150
+  mergeThresholdVectors: 50
+  splitSearchNeighbourhood: 0
+  metadataFields:
+    - name: label
+      field_type: String
+      indexed: true
+
+# Optional SlateDB toml settings. If non-empty the contents are written to the
+# configmap and SlateDB is pointed at it via `storage.settings_path`.
+slatedb:
+  settings: |
+    # SlateDB settings overrides go here. Leave empty to use SlateDB defaults.
+
+# Extra environment variables passed to the vector container.
+extraEnv:
+  - name: RUST_LOG
+    value: info
+```
+
+#### `templates/configmap.yaml`
+
+```yaml templates/configmap.yaml
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "vector.fullname" . }}-config
+  labels:
+    {{- include "vector.labels" . | nindent 4 }}
+data:
+  vector.yaml: |
+    storage:
+      type: SlateDb
+      path: {{ .Values.aws.prefix }}
+      object_store:
+        type: Aws
+        region: {{ .Values.aws.region }}
+        bucket: {{ .Values.aws.bucket }}
+      {{- if .Values.slatedb.settings }}
+      settings_path: /config/slatedb.toml
+      {{- end }}
+      block_cache:
+        type: FoyerHybrid
+        memory_capacity: {{ printf "%.0f" (.Values.disk.memoryCapacityBytes | float64) }}
+        disk_capacity: {{ printf "%.0f" (.Values.disk.diskCapacityBytes | float64) }}
+        disk_path: {{ .Values.disk.mountPath }}/block-cache
+    dimensions: {{ .Values.vector.dimensions }}
+    distance_metric: {{ .Values.vector.distanceMetric }}
+    flush_interval: {{ .Values.vector.flushInterval }}
+    split_threshold_vectors: {{ .Values.vector.splitThresholdVectors }}
+    merge_threshold_vectors: {{ .Values.vector.mergeThresholdVectors }}
+    split_search_neighbourhood: {{ .Values.vector.splitSearchNeighbourhood }}
+    metadata_fields:
+      {{- toYaml .Values.vector.metadataFields | nindent 6 }}
+  {{- if .Values.slatedb.settings }}
+  slatedb.toml: |
+{{ .Values.slatedb.settings | indent 4 }}
+  {{- end }}
+```
+
+#### `templates/serviceaccount.yaml`
+
+```taml templates/serviceaccount.yaml`
+{{- if .Values.serviceAccount.create -}}
+{{- if not .Values.serviceAccount.roleArn -}}
+{{- fail "serviceAccount.roleArn must be set" -}}
+{{- end -}}
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ include "vector.serviceAccountName" . }}
+  labels:
+    {{- include "vector.labels" . | nindent 4 }}
+  annotations:
+    eks.amazonaws.com/role-arn: {{ .Values.serviceAccount.roleArn | quote }}
+{{- end }}
+```
+
+#### `templates/pvc.yaml`
+
+```yaml templates/pvc.yaml
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ include "vector.fullname" . }}-cache
+  labels:
+    {{- include "vector.labels" . | nindent 4 }}
+spec:
+  accessModes:
+    - ReadWriteOnce
+  {{- if .Values.disk.storageClass }}
+  storageClassName: {{ .Values.disk.storageClass }}
+  {{- end }}
+  resources:
+    requests:
+      storage: {{ .Values.disk.size }}
+```
+
+#### `templates/deployment.yaml`
+
+```yaml templates/deployment.yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "vector.fullname" . }}
+  labels:
+    {{- include "vector.labels" . | nindent 4 }}
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      {{- include "vector.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "vector.selectorLabels" . | nindent 8 }}
+      annotations:
+        # Trigger a rolling restart when the rendered config changes.
+        checksum/config: {{ include (print $.Template.BasePath "/configmap.yaml") . | sha256sum }}
+    spec:
+      serviceAccountName: {{ include "vector.serviceAccountName" . }}
+      securityContext:
+        fsGroup: 1000
+      containers:
+        - name: vector
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          {{- with .Values.command }}
+          command:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- with .Values.args }}
+          args:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          ports:
+            - name: http
+              containerPort: {{ .Values.containerPort }}
+              protocol: TCP
+          env:
+            - name: AWS_REGION
+              value: {{ .Values.aws.region | quote }}
+            {{- with .Values.extraEnv }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          readinessProbe:
+            httpGet:
+              path: /-/ready
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /-/ready
+              port: http
+            initialDelaySeconds: 30
+            periodSeconds: 15
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+          volumeMounts:
+            - name: config
+              mountPath: /config
+              readOnly: true
+            - name: cache
+              mountPath: {{ .Values.disk.mountPath }}
+      volumes:
+        - name: config
+          configMap:
+            name: {{ include "vector.fullname" . }}-config
+        - name: cache
+          persistentVolumeClaim:
+            claimName: {{ include "vector.fullname" . }}-cache
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+```
+
+#### `templates/service.yaml`
+
+```yaml templates/service.yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "vector.fullname" . }}
+  labels:
+    {{- include "vector.labels" . | nindent 4 }}
+  {{- with .Values.service.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  type: {{ .Values.service.type }}
+  ports:
+    - name: http
+      port: {{ .Values.service.port }}
+      targetPort: http
+      protocol: TCP
+  selector:
+    {{- include "vector.selectorLabels" . | nindent 4 }}
+```
+
+#### `templates/_helpers.tpl`
+
+```
+{{/*
+Expand the name of the chart.
+*/}}
+{{- define "vector.name" -}}
+{{- default .Chart.Name .Values.nameOverride | trunc 63 | trimSuffix "-" -}}
+{{- end -}}
+
+{{/*
+Fully qualified app name.
+*/}}
+{{- define "vector.fullname" -}}
+{{- if .Values.fullnameOverride -}}
+{{- .Values.fullnameOverride | trunc 63 | trimSuffix "-" -}}
+{{- else -}}
+{{- $name := default .Chart.Name .Values.nameOverride -}}
+{{- if contains $name .Release.Name -}}
+{{- .Release.Name | trunc 63 | trimSuffix "-" -}}
+{{- else -}}
+{{- printf "%s-%s" .Release.Name $name | trunc 63 | trimSuffix "-" -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+
+{{- define "vector.labels" -}}
+app.kubernetes.io/name: {{ include "vector.name" . }}
+app.kubernetes.io/instance: {{ .Release.Name }}
+app.kubernetes.io/managed-by: {{ .Release.Service }}
+app.kubernetes.io/component: vector
+helm.sh/chart: {{ printf "%s-%s" .Chart.Name .Chart.Version | replace "+" "_" | trunc 63 | trimSuffix "-" }}
+{{- end -}}
+
+{{- define "vector.selectorLabels" -}}
+app.kubernetes.io/name: {{ include "vector.name" . }}
+app.kubernetes.io/instance: {{ .Release.Name }}
+{{- end -}}
+
+{{- define "vector.serviceAccountName" -}}
+{{- if .Values.serviceAccount.create -}}
+{{- default (include "vector.fullname" .) .Values.serviceAccount.name -}}
+{{- else -}}
+{{- default "default" .Values.serviceAccount.name -}}
+{{- end -}}
+{{- end -}}
+```
+
+#### Install the chart
+
+```bash
+helm install opendata-vector ./charts/opendata-vector \
+  --set s3.bucket=my-vector-bucket \
+  --set s3.region=us-west-2 \
+  --set serviceAccount.roleArn=arn:aws:iam::123456789012:role/opendata-vector
+```
+
+### Health checks
+
+Vector exposes two health-check endpoints:
+
+| Endpoint | Type | Behavior |
+| --- | --- | --- |
+| `/-/healthy` | Liveness | Returns 200 if the process is running |
+| `/-/ready` | Readiness | Returns 200 once Vector is initialized and ready to serve queries |
+
+Both probes are included in the Helm chart's Deployment template above.
+
+## Monitoring
+
+All metrics are exposed at `/metrics` in Prometheus text format.
+
+### Key Metrics
+
+| Metric | Type | Labels | Description |
+| --- | --- | --- | --- |
+| `vector_upserts_total` | counter | - | Number of vectors upserted |
+| `vector_deletes_total` | counter | - | Number of vectors deleted |
+| `vector_indexer_writes_total` | counter | - | Number of writes processed by the indexer |
+| `vector_indexer_ann_splits_total` | counter | - | Number of centroids split by the indexer |
+| `vector_indexer_ann_merges_total` | counter | - | Number of centroids merged by the indexer |
+| `vector_indexer_ann_reassigns_total` | counter | - | Number of vectors reassigned by the indexer |
+| `vector_query_vectors_scored_total` | counter | - | Total number of vectors scored by queries |
+| `vector_query_search_duration_seconds` | histogram | Search latency distribution |
+| `vector_api_requests_total` | counter | `method`, `endpoint`, `status` | Number of HTTP requests served |
+
+<Note>
+  Vector also exposes `slatedb_*` metrics from the underlying SlateDB storage
+  engine. These are useful for debugging storage-level performance and compaction
+  behavior.
+</Note>
+
+### TLS and authentication
+
+<Warning>
+  Vector does not include built-in TLS termination or authentication. Place a
+  reverse proxy (nginx, Envoy, or a cloud load balancer) in front of Vector
+  to handle TLS and access control.
+</Warning>
+
+### Object storage security
+
+The Helm chart uses [IRSA](https://docs.aws.amazon.com/eks/latest/userguide/iam-roles-for-service-accounts.html)
+(IAM Roles for Service Accounts) so that the pod receives temporary AWS
+credentials automatically — no static access keys required.
+
+Create an IAM role with the following policy and attach it to the ServiceAccount
+via the `serviceAccount.roleArn` value:
+
+```json
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Effect": "Allow",
+      "Action": [
+        "s3:GetObject",
+        "s3:PutObject",
+        "s3:DeleteObject",
+        "s3:ListBucket",
+        "s3:GetBucketLocation"
+      ],
+      "Resource": [
+        "arn:aws:s3:::my-vector-bucket",
+        "arn:aws:s3:::my-vector-bucket/*"
+      ]
+    }
+  ]
+}
+```
+
+The IAM role's trust policy should scope access to your EKS cluster's OIDC
+provider and the specific service account:
+
+```json
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Effect": "Allow",
+      "Principal": {
+        "Federated": "arn:aws:iam::123456789012:oidc-provider/oidc.eks.us-west-2.amazonaws.com/id/EXAMPLE"
+      },
+      "Action": "sts:AssumeRoleWithWebIdentity",
+      "Condition": {
+        "StringEquals": {
+          "oidc.eks.us-west-2.amazonaws.com/id/EXAMPLE:aud": "sts.amazonaws.com",
+          "oidc.eks.us-west-2.amazonaws.com/id/EXAMPLE:sub": "system:serviceaccount:default:opendata-vector"
+        }
+      }
+    }
+  ]
+}
+```
+
+Additional recommendations:
+
+- Enable **encryption at rest** on the S3 bucket (SSE-S3 or SSE-KMS).
+- Use a **VPC endpoint** for S3 to keep traffic off the public internet.
+- Block all public access on the bucket.
