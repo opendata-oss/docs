@@ -175,7 +175,7 @@ data:
 
 #### `templates/serviceaccount.yaml`
 
-```taml templates/serviceaccount.yaml`
+```yaml templates/serviceaccount.yaml
 {{- if .Values.serviceAccount.create -}}
 {{- if not .Values.serviceAccount.roleArn -}}
 {{- fail "serviceAccount.roleArn must be set" -}}
