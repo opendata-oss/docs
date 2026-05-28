@@ -156,6 +156,130 @@ with that last persisted sequence number so it resumes right after it. The
 new consumer also bumps the epoch, fencing the old one and preventing any
 duplicate writes.
 
+## Read-ahead and batched acks
+
+The serial `next_batch` / `ack` API caps a consumer at one manifest read
+and one ack write per batch. Fetching a batch is an I/O wait; decoding it
+is CPU work; and writing it to another system is yet more I/O work. Doing 
+everything on one task in a tight loop wastes both the
+object-store bandwidth and the machine's cores. For high-throughput
+consumers, `Consumer` exposes a parallel-fetch path:
+
+```rust
+pub async fn next_descriptors(&mut self, max: usize)
+    -> Result<Vec<BatchDescriptor>>;
+pub async fn fetch_descriptor(&mut self, d: BatchDescriptor)
+    -> Result<ConsumedBatch>;
+pub fn fetch_handle(&self) -> ConsumerFetchHandle;
+pub async fn ack_through(&mut self, sequence: u64) -> Result<()>;
+```
+
+The design batches the expensive low-volume operations (manifest read,
+ack) and parallelizes the high-volume operations (fetch,
+decode). The serial `next_batch` / `ack` API still works without changes:
+`next_batch` is a thin wrapper over `next_descriptors(1)` plus
+`fetch_descriptor`, and `ack` keeps its amortize-every-100-calls behavior.
+
+### How the split works
+
+`next_descriptors(max)` reads the manifest once and returns up to `max`
+contiguous descriptors past an internal read-ahead cursor. It does no
+object-store fetch and does not mutate the durable ack frontier.
+
+`ConsumerFetchHandle` is a cheap, cloneable handle obtained from
+`fetch_handle()`. It holds an `Arc` to the object store and the manifest
+path. Its single method, `fetch(&self, descriptor) -> Result<ConsumedBatch>`,
+fetches and decodes one batch, touches no `Consumer` cursor, and is safe
+to call concurrently from many tasks. Cloning the handle is O(1).
+
+`ack_through(sequence)` advances the durable ack frontier through
+`sequence` in one `dequeue` write, no matter how far the frontier moves.
+The dequeue runs first; in-memory state and the `buffer.acks` counter
+advance only on success, so a fence or storage error leaves the
+consumer's state untouched and the call is safe to retry.
+
+### Pipelined consumer pattern
+
+One task owns the `Consumer` and the manifest; N fetch workers each hold
+a clone of the handle and pull descriptors off a bounded channel:
+
+```rust
+let consumer = Consumer::new(config, last_acked).await?;
+let fetcher  = consumer.fetch_handle();
+
+// N fetch workers, each holding a clone of the handle:
+for _ in 0..fetch_concurrency {
+    let f = fetcher.clone();
+    let rx = descriptor_rx.clone();
+    tokio::spawn(async move {
+        while let Some(d) = rx.recv().await {
+            let batch = f.fetch(d).await?;
+            // ...hand off to a decode / sink stage...
+        }
+        Ok::<(), Error>(())
+    });
+}
+
+// Owner task: pull a run of descriptors, fan them out, ack the
+// contiguous high watermark.
+loop {
+    let descriptors = consumer.next_descriptors(K).await?;
+    for d in descriptors { descriptor_tx.send(d).await?; }
+    // ...wait for the contiguous-completed high watermark, then:
+    consumer.ack_through(high).await?;
+}
+```
+
+Owner and workers run in parallel because their state is disjoint: two 
+concurrent fetches against distinct descriptors do not contend on the manifest.
+
+### Descriptor handout contract
+
+`next_descriptors` advances an internal `last_handed_out_sequence`
+*before* the caller has fetched the objects. Read-ahead is the point.
+That places one obligation on the caller:
+
+`ack_through(n)` does not verify that anything below `n` was processed.
+It unconditionally advances the durable frontier to `n`, rejecting only
+`n <= last_acked_sequence`. The caller must track which sequences have
+actually been processed and only call `ack_through` with the highest
+fully-processed *contiguous* sequence. Fetches may complete out of order;
+ack the contiguous-complete watermark, never past a still-pending
+sequence.
+
+If a descriptor is permanently lost (a worker panics, a channel send is
+dropped), the frontier stalls at that sequence. Recovery is process
+restart: `Consumer::new(config, last_acked_sequence)` re-emits everything
+the durable frontier has not acked.
+
+### Fencing
+
+`next_descriptors` returns `Error::Fenced` on the next manifest read
+after fencing. A worker holding a stale handle keeps fetching
+successfully against object storage; the manifest owner learns of the
+fence and propagates it, typically by closing the descriptor channel.
+`ack_through` against a fenced manifest returns `Error::Fenced` and
+leaves state untouched, so a fenced consumer cannot advance the durable
+frontier.
+
+### When to use which API
+
+The serial `next_batch` / `ack` API stays the right choice for
+low-throughput single-task consumers (the timeseries and vector buffer
+consumers use it) and for backfill tooling where a tight per-batch ack
+loop is simpler than the pipeline.
+
+Reach for the read-ahead path when consumer throughput is bounded by
+manifest round-trips (one `next_batch` cycle per batch caps throughput
+at `1 / manifest_RTT`), when fetch I/O and decode CPU need to overlap
+across batches, or when the workload is bursty enough that an in-flight
+bytes ceiling fits better than per-batch flow control.
+
+The opendata-contrib [generic ingest runtime](https://github.com/opendata-oss/opendata-contrib/blob/main/rfcs/0002-generic-ingest-runtime.md) is one pipelined consumer
+built on these primitives. Full design rationale, the descriptor handout
+contract in detail, and the failure-mode catalog live in [RFC 0003:
+Consumer Read-Ahead and `ack_through`](https://github.com/opendata-oss/opendata/blob/main/buffer/rfcs/0003-consumer-read-ahead.md).
+
 ## Usage example
 
 For an example of how Buffer can be integrated into an ingestion pipeline see
