@@ -160,7 +160,8 @@ duplicate writes.
 
 The serial `next_batch` / `ack` API caps a consumer at one manifest read
 and one ack write per batch. Fetching a batch is an I/O wait; decoding it
-is CPU work; doing both on one task in a tight loop wastes both the
+is CPU work; and writing it to another system is yet more I/O work. Doing 
+everything on one task in a tight loop wastes both the
 object-store bandwidth and the machine's cores. For high-throughput
 consumers, `Consumer` exposes a parallel-fetch path:
 
@@ -174,10 +175,10 @@ pub async fn ack_through(&mut self, sequence: u64) -> Result<()>;
 ```
 
 The design batches the expensive low-volume operations (manifest read,
-ack) and parallelizes the cheap-per-call high-volume operations (fetch,
-decode). The legacy `next_batch` / `ack` API still works without changes:
+ack) and parallelizes the high-volume operations (fetch,
+decode). The serial `next_batch` / `ack` API still works without changes:
 `next_batch` is a thin wrapper over `next_descriptors(1)` plus
-`fetch_descriptor`, and `ack` keeps its amortize-every-100 behavior.
+`fetch_descriptor`, and `ack` keeps its amortize-every-100-calls behavior.
 
 ### How the split works
 
@@ -229,10 +230,8 @@ loop {
 }
 ```
 
-Owner and workers run in parallel because their state is disjoint: the
-owner's `&mut Consumer` and the workers' `&self` on cloned handles do
-not interact at the borrow-checker level. Two concurrent fetches against
-distinct descriptors do not contend on the manifest.
+Owner and workers run in parallel because their state is disjoint: two 
+concurrent fetches against distinct descriptors do not contend on the manifest.
 
 ### Descriptor handout contract
 
@@ -263,22 +262,6 @@ fence and propagates it, typically by closing the descriptor channel.
 leaves state untouched, so a fenced consumer cannot advance the durable
 frontier.
 
-### Cursor semantics
-
-The consumer maintains three monotonic cursors, all on `Consumer` and
-all mutated only through `&mut self`:
-
-| Cursor | Advances on | Meaning |
-|---|---|---|
-| `last_acked_sequence` | `ack` success, `ack_through` after a successful dequeue | Highest sequence durably dequeued |
-| `last_fetched_sequence` | `fetch_descriptor` | Highest sequence the serial wrapper has read; feeds `consumer_lag_seconds` |
-| `last_handed_out_sequence` | `next_descriptors` | Highest sequence handed out as a descriptor |
-
-`ConsumerFetchHandle::fetch` advances no cursor. A parallel-fetch caller
-that wants a lag signal computes it from
-`ConsumedBatch.metadata.last().ingestion_time_ms` against wall-clock
-time and emits its own gauge.
-
 ### When to use which API
 
 The serial `next_batch` / `ack` API stays the right choice for
@@ -292,7 +275,7 @@ at `1 / manifest_RTT`), when fetch I/O and decode CPU need to overlap
 across batches, or when the workload is bursty enough that an in-flight
 bytes ceiling fits better than per-batch flow control.
 
-The opendata-contrib generic ingest runtime is one pipelined consumer
+The opendata-contrib [generic ingest runtime](https://github.com/opendata-oss/opendata-contrib/blob/main/rfcs/0002-generic-ingest-runtime.md) is one pipelined consumer
 built on these primitives. Full design rationale, the descriptor handout
 contract in detail, and the failure-mode catalog live in [RFC 0003:
 Consumer Read-Ahead and `ack_through`](https://github.com/opendata-oss/opendata/blob/main/buffer/rfcs/0003-consumer-read-ahead.md).
