@@ -126,3 +126,23 @@ html:not(.dark) pre.ascii-art {
   border: 1px solid #e3d9c3 !important;
   border-radius: 0;
 }
+
+/* Angular corners: the theme is square, so code blocks and image frames lose
+   their rounding (just the corners — no added border). Mode-agnostic. */
+.code-block,
+.code-block-background,
+[data-name="frame"] {
+  border-radius: 0 !important;
+}
+
+/* Chrome UI also goes angular: the search bar and the bottom navigation pill
+   (and their inner chips/buttons). The dark-mode toggle stays round — a square
+   switch reads as broken. */
+#search-bar-entry,
+#search-bar-entry *,
+#search-bar-entry-mobile,
+#search-bar-entry-mobile *,
+#pagination,
+#pagination * {
+  border-radius: 0 !important;
+}
