@@ -118,12 +118,12 @@ html:not(.dark) .callout {
   border-left-color: #c79a00 !important;
 }
 
-/* ASCII diagrams: black on white inside a cream hairline border (sharp
+/* ASCII diagrams: black on white inside a standard gray hairline border (sharp
    corners), so the box-drawing reads with full contrast. */
 html:not(.dark) pre.ascii-art {
   background: #fff !important;
   color: #1a1a1a !important;
-  border: 1px solid #e3d9c3 !important;
+  border: 1px solid #e4e4e4 !important;
   border-radius: 0;
 }
 
