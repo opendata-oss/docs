@@ -70,3 +70,59 @@ pre.ascii-art {
   overflow-x: auto;
   letter-spacing: 0;
 }
+
+/* ============================================================
+   D2 — signature components from the home page kit.
+   The heavier flourishes (hard offset shadow, warm paper) are
+   scoped to light mode; dark-mode styling is still an open call,
+   so dark stays maple-default for now. The blue accent + fonts
+   (from D1) already carry across both themes.
+   ============================================================ */
+
+/* Sidebar group labels adopt the home page's mono uppercase
+   "section label" voice. Already blue (text-primary) from D1. */
+.eyebrow {
+  font-family: 'JetBrains Mono', ui-monospace, monospace !important;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  font-size: 0.72rem;
+}
+
+/* Cards: square the corners and add the blue accent edge + the
+   home page's signature hard offset shadow. */
+.card {
+  border-radius: 0 !important;
+  border-left: 3px solid var(--od-blue) !important;
+}
+html:not(.dark) .card {
+  box-shadow: 6px 6px 0 0 #d6d7d9;
+}
+
+/* Callouts: squared, with a type-colored left accent and a light
+   offset shadow. maple's per-type background + icon hue is kept so
+   note/warning/info stay semantically distinct. */
+.callout {
+  border-radius: 0 !important;
+  border-left-width: 3px !important;
+}
+html:not(.dark) .callout {
+  box-shadow: 4px 4px 0 0 rgba(20, 24, 40, 0.06);
+}
+.callout[data-callout-type="note"],
+.callout[data-callout-type="info"],
+.callout[data-callout-type="check"],
+.callout[data-callout-type="tip"] {
+  border-left-color: var(--od-blue) !important;
+}
+.callout[data-callout-type="warning"] {
+  border-left-color: #c79a00 !important;
+}
+
+/* ASCII diagrams: black on white inside a cream hairline border (sharp
+   corners), so the box-drawing reads with full contrast. */
+html:not(.dark) pre.ascii-art {
+  background: #fff !important;
+  color: #1a1a1a !important;
+  border: 1px solid #e3d9c3 !important;
+  border-radius: 0;
+}
