@@ -3,9 +3,9 @@
   "theme": "maple",
   "name": "OpenData",
   "colors": {
-    "primary": "#525252",
-    "light": "#A3A3A3",
-    "dark": "#262626"
+    "primary": "#4971ab",
+    "light": "#7da0d4",
+    "dark": "#375481"
   },
   "favicon": "/favicon.svg",
   "navigation": {
