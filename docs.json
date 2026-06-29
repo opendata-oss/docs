@@ -31,6 +31,7 @@
           "timeseries/configuration",
           "timeseries/ingest",
           "timeseries/production",
+          "timeseries/benchmarks",
           {
             "group": "API reference",
             "openapi": "openapi/timeseries.yaml",
@@ -53,6 +54,7 @@
           "log/quickstart",
           "log/storage-design",
           "log/production",
+          "log/benchmarks",
           {
             "group": "API reference",
             "openapi": "openapi/log.yaml",
@@ -75,6 +77,7 @@
           "vector/data-model",
           "vector/storage-design",
           "vector/production",
+          "vector/benchmarks",
           {
             "group": "API reference",
             "openapi": "openapi/vector.yaml",
@@ -100,7 +103,8 @@
         "pages": [
           "buffer/index",
           "buffer/architecture",
-          "buffer/configuration"
+          "buffer/configuration",
+          "buffer/benchmarks"
         ]
       }
     ]

@@ -1,0 +1,95 @@
+---
+title: Benchmarks
+description: Ingestion throughput, query latency, and cost for a single-node Timeseries deployment
+---
+
+These are the published benchmark results for OpenData Timeseries, measured on a
+single node backed by SlateDB on S3. They first appeared in the launch post,
+[OpenData Timeseries: Prometheus-compatible metrics on object storage](https://www.opendata.dev/blog/introducing-timeseries).
+
+The system is early and there is room to optimize further, but these numbers
+show what one box handles today.
+
+## Ingestion
+
+Ingestion was measured with [p8s-bench](https://github.com/responsivedev/p8s-bench),
+a harness around VictoriaMetrics'
+[prometheus-benchmark](https://github.com/VictoriaMetrics/prometheus-benchmark)
+tool. The load generator produced samples for 5,100 targets every 60 seconds,
+for a total of ~3.3M unique active series.
+
+On a single `m5.xlarge` node (4 vCPU, 16 GB RAM) with SlateDB's WAL disabled,
+Timeseries sustained:
+
+| Metric | Result |
+| --- | --- |
+| Sustained ingestion | **55k samples/sec** |
+| Daily volume | **4.7B samples/day** |
+| Active series | ~3.3M unique series |
+| Node | `m5.xlarge` (4 vCPU, 16 GB) |
+
+<Frame caption="Sustained ingestion rate over the soak test on a single m5.xlarge node.">
+  <img src="/timeseries/images/soak_chart.png" alt="Soak chart showing ingestion holding at ~55k samples/sec over time" />
+</Frame>
+
+Disabling the WAL is acceptable for many timeseries workloads, particularly
+those paired with a durable upstream log like
+[OpenData Buffer](/buffer/benchmarks).
+
+## Query latency
+
+Query latency depends mostly on how much data a query touches and whether that
+data is already in the SlateDB block cache. The chart below plots cold and warm
+query latency as a function of the number of series matched and scanned over a
+6-hour time range.
+
+<Frame caption="Cold vs. warm query latency by number of series scanned over a 6-hour range.">
+  <img src="/timeseries/images/query-latency-bar-chart.png" alt="Bar chart comparing cold and warm query latency across increasing series counts" />
+</Frame>
+
+Warm numbers are the ones that matter for day-to-day use: alerts and active
+dashboards keep their data warm, and once recent data is in the block cache,
+queries stop paying object-store round trips. On the benchmark `r5d.xlarge`
+node, roughly 8 GB of RAM plus ~140 GB of NVMe-backed disk cache keep several
+weeks of data warm (assuming 1–2 bytes per sample for Gorilla-compressed
+blocks).
+
+Cold reads pay the object-store round trip (10–100 ms). Reducing query latency
+is the most active area of work; see the launch post for the specific
+optimizations in progress
+([proactive metadata warming](https://github.com/opendata-oss/opendata/pull/412),
+tuned parallelism, request batching, block-cache efficiency).
+
+## Cost
+
+The same workload (3.3M active series, 4.7B samples/day) costs roughly **$560/month
+of compute**:
+
+| Component | Spec | Monthly |
+| --- | --- | --- |
+| Writer | 1× `m5.xlarge` | ~$140 |
+| Readers | 2× `r5d.xlarge` (140 GB local NVMe) | ~$210 each |
+| **Compute total** | | **~$560** |
+| S3 PUT requests | WAL disabled | ~$5–12 |
+| S3 storage | standard rates | a few dollars |
+
+### Versus managed alternatives
+
+At published rates, the same workload on managed Prometheus-compatible platforms:
+
+| Provider | Pricing model | Est. monthly cost |
+| --- | --- | --- |
+| [Amazon Managed Prometheus](https://aws.amazon.com/prometheus/pricing/) | $0.90 per 10M samples ingested | ~$12,830 |
+| [Grafana Cloud](https://grafana.com/pricing/) Pro | $6.50 per 1,000 active series | ~$21,443 |
+| [Grafana Cloud](https://grafana.com/pricing/) Enterprise (min $2,000/mo commit) | ~$3.00 per 1,000 active series | ~$9,897 |
+| Self-hosted OpenData Timeseries | reader + writer nodes plus S3 | ~$560 + S3 |
+
+The numbers are not exact, but the structural gap holds: a handful of nodes at
+roughly $560/month versus $10,000–20,000/month for a managed service at the same
+scale.
+
+## Reproduce it
+
+- Ingestion harness: [p8s-bench](https://github.com/responsivedev/p8s-bench)
+- Underlying tool: [VictoriaMetrics prometheus-benchmark](https://github.com/VictoriaMetrics/prometheus-benchmark)
+- Storage design: [Timeseries storage design](/timeseries/storage-design) and the [TSDB storage RFC](https://github.com/opendata-oss/opendata/blob/main/timeseries/rfcs/0001-tsdb-storage.md)

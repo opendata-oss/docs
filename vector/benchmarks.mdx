@@ -1,0 +1,122 @@
+---
+title: Benchmarks
+description: Query latency, ingest throughput, and cost for OpenData Vector across standard ANN datasets
+---
+
+These are the published benchmark results for OpenData Vector, measured on a
+single `c6id.4xlarge` node against standard Approximate Nearest Neighbor (ANN)
+datasets. They first appeared in the launch post,
+[OpenData Vector: MIT-licensed Vector Search on Object Storage](https://www.opendata.dev/blog/introducing-vector).
+You can reproduce them, or run the same measurements against your own data, with
+[Vector Bench](#run-it-on-your-own-data).
+
+All latencies were recorded at a steady-state query throughput of **32 queries/s
+at 90% recall** (SIFT 1M was recorded at 97% recall). Reported ingestion
+throughput is the steady-state throughput for each dataset in isolation.
+
+## Query latency
+
+<Frame caption="Warm and cold query latency, and ingest throughput, across standard ANN datasets.">
+  <img src="/vector/images/latency-throughput.png" alt="Query latency and ingest throughput across ANN datasets" />
+</Frame>
+
+| Dataset class | Warm latency | Cold latency (P90) |
+| --- | --- | --- |
+| Small (Sift1M, Sift10M, Cohere1M) | low single-digit ms | ≤ ~1 s |
+| Large | low teens of ms | ≤ ~1 s |
+
+For cold queries, tail latency is dominated by the slowest time to fetch a
+posting list from S3. For warm queries against small datasets, all postings sit
+in the in-memory cache, so latency reflects how fast Vector loads postings and
+scores candidates. Larger datasets score more postings to reach high recall, and
+some of those reads come from local disk cache, which adds delay.
+
+The IVF index trades in both directions here. Warm queries run in ~10 ms rather
+than the sub-millisecond of an HNSW graph index, but cold queries stay
+sub-second where a cold HNSW graph can take dozens of seconds to load.
+
+## Ingest throughput
+
+Vector sustains between **~1K and ~12K vector writes/second**, depending on
+dataset size and vector dimensions. Re-ingesting the full SIFT 100M dataset took
+~6 hours at a stable rate without significant stalls, demonstrating that the
+LIRE compaction protocol ingests incrementally.
+
+<Frame caption="Trailing 5-minute ingest throughput while re-ingesting the Sift100M dataset (~6 hours).">
+  <img src="/vector/images/ingest-throughput.png" alt="Ingest throughput holding stable over the Sift100M re-ingestion run" />
+</Frame>
+
+Ingestion is bottlenecked on (1) traversing the centroid index to assign vectors
+to postings and (2) computing new clusters when centroids split during LIRE.
+More vectors means more centroids to search; more dimensions makes distance
+computation more expensive.
+
+## Cost
+
+Vector serves 100M vectors for roughly **$346/month of compute** (1×
+`c6id.4xlarge` on a 1-year reservation):
+
+| Component | Driver | Monthly |
+| --- | --- | --- |
+| Compute | 1× `c6id.4xlarge` (1-yr reservation) | $346 |
+| S3 PUT requests | ~1 SlateDB write/sec | tens of dollars |
+| S3 storage | SIFT 100M ≈ 200–500 GB after attributes + LSM space amplification | ~$5–12 |
+
+S3 charges sit outside the compute figure but stay small: Vector batches writes
+into roughly one SlateDB write per second.
+
+## Run it on your own data
+
+The most common question after launch was "how will it perform and what will it
+cost for *my* workload?". To answer that, the benchmark harness is open source:
+[`vector/bench/`](https://github.com/opendata-oss/opendata/tree/main/vector/bench)
+in the OpenData repository. The
+[Vector Bench launch post](https://www.opendata.dev/blog/vector-bench) walks
+through it.
+
+Vector Bench runs each dataset through three independent phases, since Vector's
+design fully decouples read and write workloads so you can capacity-plan them
+separately:
+
+| Phase | What it measures |
+| --- | --- |
+| `INGEST` | ingestion throughput as a 5-minute trailing window (sampled every minute) |
+| `WARM` | recall@10, QPS, and p50/p90/p99 latency after a warmup pass, under a rate-limited concurrent query workload |
+| `COLD` | query performance with a freshly-allocated memory-only block cache, so every SST block read comes from object storage |
+
+### Included datasets
+
+| Dataset | Vectors | Dimensions | Source |
+| --- | --- | --- | --- |
+| SIFT/BIGANN (100K, 1M, 10M, 100M subsets) | up to 100M | 128 | image feature embeddings |
+| Cohere1M | 1M | 768 | Wikipedia text embeddings |
+| Cohere10M | 10M | 1024 | Wikipedia text embeddings |
+
+You can also point the benchmark at your own data in `fvecs`, `bvecs`, or
+parquet format. The simplest way to start is the 100K-vector SIFT subset that
+ships in the repo:
+
+```bash
+cargo run -p vector-bench --release -- --config vector/bench/sift100k.toml
+```
+
+That exercises all three phases against a SlateDB pointed at a local object
+store and takes ~20 seconds on a laptop. See the
+[README](https://github.com/opendata-oss/opendata/blob/main/vector/bench/README.md)
+for configuring larger runs against a real object store, and for the bundled
+Claude Skill that infers a config from your raw data.
+
+### Caveats
+
+Vector is early. A few limits to keep in mind when reading these numbers:
+
+- **Metadata filters** are applied after the ANN index yields candidates, so
+  recall on filtered queries can be poor. Native attribute filtering is on the
+  near-term roadmap.
+- **No deletes or mixed updates** in the ingest phase; it scans and ingests
+  vectors only.
+- **No mixed read/write**: phases are sequential. In practice ingest and query
+  are capacity-planned separately because the architecture isolates them.
+- **Embedded only**: the benchmark runs Vector in embedded mode rather than
+  standing up a server. Server overhead is expected to be minimal relative to
+  indexing and index traversal, so the numbers should still be representative.
