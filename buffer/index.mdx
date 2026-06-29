@@ -1,15 +1,63 @@
 ---
 title: Buffer
-description: Highly-available ingestion buffer on object storage
+description: An MIT-licensed, stateless buffer that turns object storage into a low-latency queue, replacing Kafka for telemetry pipelines
 ---
 
-Buffer is a stateless write-path library that uses object storage as a durable
-queue between producers and a database. Producers accept opaque byte entries,
-batch them, and flush them to object storage. A single binary manifest in
-object storage coordinates producers and consumers using queue semantics.
-Because the data and the manifest live in object storage, Buffer is stateless
-and horizontally scalable. Object storage takes care of durability and
-availability.
+Buffer is an MIT-licensed, stateless library that uses object storage as a
+durable queue between producers and consumers. Producers batch opaque byte
+entries and flush them to object storage as append-only data files; a single
+manifest coordinates producers and consumers through atomic compare-and-set.
+Because both the data and the manifest live in object storage, Buffer is
+stateless, horizontally scalable, and leaves durability and availability to S3.
+
+The Kafka protocol does two hard things well: it stores ordered data with
+optional transactional semantics, and it tracks consumption so consumer groups
+can collaborate. Telemetry and event data need neither. A log line or a metric
+sample has no causal relationship to the records around it. Buffer drops the
+distributed-systems machinery those guarantees require, which is what makes it
+far simpler and cheaper than a full log.
+
+## What it's good at
+
+- **Telemetry and event pipelines.** Logs, metrics, and clickstream data on
+  their way to a database or warehouse, where strict global ordering and
+  transactional produce aren't required.
+- **High-availability zonal ingest.** Stateless ingestors run in each
+  availability zone, batching and writing to object storage with no cross-AZ
+  network charges and at-least-once delivery.
+- **High throughput.** Three zonal writers scale past several Gbps, so most
+  pipelines never need partitioning.
+- **Pluggable sinks.** A native OpenTelemetry exporter on the producer side, a
+  pipelined consumer runtime, and a ClickHouse integration today, with Iceberg
+  and other destinations on the roadmap.
+
+## Why Buffer
+
+Buffer does one thing: it makes object storage usable as a moderately
+low-latency queue. That focus is the reason it costs a small fraction of a
+managed or self-hosted Kafka cluster for the same throughput. The ingestors are
+stateless, so you scale and fail over by adding or replacing pods rather than
+rebalancing a stateful cluster. The manifest's compare-and-set gives you
+at-least-once delivery and fences zombie collectors to avoid split-brain.
+
+The pipelined producer and consumer clients keep many object-storage requests in
+flight at once, and each data batch carries a stable identity across retries so
+sinks can deduplicate. See the [benchmarks](/buffer/benchmarks) for end-to-end
+latency, throughput, and a cost comparison against Kafka.
+
+## Tradeoffs
+
+- **Finite participants.** Throughput scales inversely with the number of
+  participants, since metadata updates contend on a single object-storage
+  compare-and-set. Run one writer per zone and a fixed, limited number of
+  consumers.
+- **No partition multiplexing.** Partitioning is a user-space concern. If
+  vertical scaling isn't enough, deploy multiple buffers and let Kubernetes
+  handle scheduling and liveness.
+- **Higher latency than in-memory Kafka.** Batching to object storage and
+  polling the manifest is a two-hop design. In practice that means a p99 of a
+  couple of seconds, tunable down to a low floor by flushing and polling more
+  often at the cost of more object-storage requests.
 
 <CardGroup cols={2}>
   <Card title="Architecture" icon="sitemap" href="buffer/architecture">
