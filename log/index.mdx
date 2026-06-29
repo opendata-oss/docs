@@ -38,8 +38,8 @@ consumer offsets to rewrite when you split or merge. Because Log builds on
 SlateDB, you can split a node with a metadata-only operation and point consumers
 at the new instance to resume from the same offset, with no data shuffle.
 
-Object storage as the only durable layer makes Log strongly consistent, durable,
-and cheap to operate. Read replicas scale linearly, and scoping a replica to a
+Object storage as the only durable layer makes Log strongly consistent and cheap
+to operate. Read replicas scale linearly, and scoping a replica to a
 contiguous key range keeps its cache warm with data that nearby queries will
 reuse. See the [benchmarks](/log/benchmarks) for throughput, poll latency, and
 cost on a single node.

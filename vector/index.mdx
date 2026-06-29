@@ -34,13 +34,13 @@ never coordinate with each other.
 
 ## Why Vector
 
-A truly stateless architecture is what makes Vector cheaper, more reliable, and
-easier to operate than earlier vector databases. Any node can serve any data, so
+A truly stateless architecture is what makes Vector cheaper and easier to operate
+than earlier vector databases. Any node can serve any data, so
 there are no shard assignments to manage and no rebalancing when nodes come and
 go. The index is an inverted file (IVF/SPANN) tuned for object storage: it
 batch-loads index data per round trip rather than making the sequential,
-hop-by-hop reads a graph index requires, which is what keeps cold queries fast
-despite object-store latency.
+hop-by-hop reads a graph index requires, so cold queries stay fast despite
+object-store latency.
 
 Reads and writes are fully decoupled, so you can capacity-plan ingest and query
 independently. See the [benchmarks](/vector/benchmarks) for recall, warm and cold

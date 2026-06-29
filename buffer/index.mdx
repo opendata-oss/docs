@@ -8,14 +8,15 @@ durable queue between producers and consumers. Producers batch opaque byte
 entries and flush them to object storage as append-only data files; a single
 manifest coordinates producers and consumers through atomic compare-and-set.
 Because both the data and the manifest live in object storage, Buffer is
-stateless, horizontally scalable, and leaves durability and availability to S3.
+stateless and horizontally scalable, and it leaves durability and availability
+to S3.
 
 The Kafka protocol does two hard things well: it stores ordered data with
 optional transactional semantics, and it tracks consumption so consumer groups
 can collaborate. Telemetry and event data need neither. A log line or a metric
-sample has no causal relationship to the records around it. Buffer drops the
-distributed-systems machinery those guarantees require, which is what makes it
-far simpler and cheaper than a full log.
+sample has no causal relationship to the records around it. By skipping the
+distributed-systems machinery those guarantees require, Buffer stays far simpler
+and cheaper than a full log.
 
 ## What it's good at
 
