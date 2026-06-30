@@ -1,22 +1,63 @@
 ---
 title: Buffer
-description: Highly-available ingestion buffer on object storage
+description: An MIT-licensed, stateless buffer that turns object storage into a low-latency queue, replacing Kafka for many high throughput pipelines.
 ---
 
-Buffer is a stateless write-path library that uses object storage as a durable
-queue between producers and a database. Producers accept opaque byte entries,
-batch them, and flush them to object storage. A single binary manifest in
-object storage coordinates producers and consumers using queue semantics.
-Because the data and the manifest live in object storage, Buffer is stateless
-and horizontally scalable. Object storage takes care of durability and
-availability.
+Buffer is an MIT-licensed, stateless library that uses object storage as a
+durable queue between producers and consumers. Producers batch opaque byte
+entries and flush them to object storage as append-only data files. 
+Consumers pull batches directly from objectstorage. A single
+manifest coordinates producers and consumers through atomic compare-and-set operations.
+Because both the data and the manifest live in object storage, Buffer is
+stateless and horizontally scalable, and it leaves durability and availability
+to S3.
 
+
+## What it's good at
+
+Buffer was built for high throughput data pipeliens which don't need strict ordering and where sink-side deduplication is acceptable. This describes a vast majority of observability and event pipelines, like those shipping logs, metrics, and traces to observability stores. Or if you need to ship clicksteram data to systems like Clickhouse, etc.
+
+## Why Buffer
+
+Buffer does one thing: it makes object storage usable as a moderately
+low-latency queue. That focus is the reason it costs a small fraction of a
+managed or self-hosted Kafka cluster for the same throughput. The ingestors are
+stateless, so you scale and fail over by adding or replacing pods rather than
+rebalancing a stateful cluster. The manifest's compare-and-set gives you
+at-least-once delivery and fences zombie clients.
+
+The pipelined producer and consumer clients keep many object-storage requests in
+flight at once, and each data batch carries a stable identity across retries so
+sinks can deduplicate. See the [benchmarks](/buffer/benchmarks) for end-to-end
+latency, throughput, and a cost comparison against Kafka.
+
+## Tradeoffs
+
+- **Finite participants.** Throughput scales inversely with the number of
+  participants, since metadata updates contend on a single object-storage
+  compare-and-set. Run one writer per zone and a fixed, limited number of
+  consumers.
+- **No partition multiplexing.** Partitioning is a user-space concern. If
+  vertical scaling isn't enough, deploy multiple buffers and let Kubernetes
+  handle scheduling and liveness.
+- **Higher latency than in-memory Kafka.** Batching to object storage and
+  polling the manifest is a two-hop design. In practice that means a p99 of a
+  couple of seconds, tunable down to a low floor by flushing and polling more
+  often at the cost of more object-storage requests.
+
+## Explore Buffer
 <CardGroup cols={2}>
   <Card title="Architecture" icon="sitemap" href="buffer/architecture">
     How Buffer works by leveraging object storage
   </Card>
   <Card title="Configuration" icon="gear" href="buffer/configuration">
     How to configure producers and consumers
+  </Card>
+  <Card title="Integrations" icon="plug" href="buffer/integrations">
+    The OTel exporter and the ClickHouse ingest runtime
+  </Card>
+  <Card title="Benchmarks" icon="gauge-high" href="buffer/benchmarks">
+    End-to-end latency, throughput, and cost versus Kafka
   </Card>
   <Card title="GitHub" icon="github" href="https://github.com/opendata-oss/opendata/tree/main/buffer">
     View the source code, open issues, and contribute

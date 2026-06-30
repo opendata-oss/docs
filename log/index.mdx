@@ -1,13 +1,59 @@
 ---
 title: Log
-description: Key-oriented event streaming built on an LSM tree
+description: A key-oriented, objectstore-native log for routing events to addressable destinations
 ---
 
-Log is an append-only event streaming system built on [SlateDB](https://slatedb.io)
-and object storage. Records are organized by key and assigned a global sequence
-number, making it easy to fan out ordered events to multiple consumers. Because
-all data is durably stored in object storage, a single replica provides full
-durability with no operational overhead for replication or backups.
+Log is an MIT-licensed, key-oriented log built on [SlateDB](https://slatedb.io)
+and object storage. It maintains millions of individually keyed, ordered logs on
+a single node and scales to tens of thousands of active readers, each tailing
+its own key. It runs as a single Rust binary with object storage as its only
+durability requirement.
+
+
+## What it's good at
+
+- **Routing workloads.** Messaging, feeds, agent traces, and microservice
+  communication, where each destination wants a specific subset of keys rather
+  than the whole stream.
+- **High key cardinality.** Hundreds of thousands to millions of keys on one
+  node. Any key's log is a prefix scan on an LSM index, not a needle-in-a-haystack
+  scan of an entire partition.
+- **Large read fan-out.** Tens of thousands of concurrent followers reading from
+  a single instance, scaled further by adding read replicas that pull straight
+  from object storage.
+- **Per-key isolation.** Position metadata is tracked per key, so a poison-pill
+  message stays contained to its key instead of blocking an entire partition.
+
+## Why Log
+
+Kafka was built to collect data from many high-cardinality sources and
+coalesce it onto one low-cardinality pipe. Log is built for the other half of
+logging, *routing*: delivering events from granular  sources to granular 
+destinations. 
+
+If your consumers each care about a specific subset of keys, you want to be able to retrieve 
+the events for a key as efficiently as possible. That's why Log addresses events by key rather 
+than topic-partitions. You simply `scan` the Log by key and get ordered values back.
+
+Object storage as the only durable layer makes Log strongly consistent and cheap
+to operate. Read replicas scale linearly, and scoping a replica to a
+contiguous key range keeps its cache warm with data that nearby queries will
+reuse. See the [benchmarks](/log/benchmarks) for throughput, poll latency, and
+cost on a single node.
+
+## Tradeoffs
+
+- **Poll latency scales with ingest rate.** Higher ingest rates evicts hot data before
+  compaction can collocate keys for efficient querying. The mitigation is scoping
+  read replicas to smaller key ranges so the cache isn't thrashed by unrelated
+  blocks.
+- **Object-storage latency floors apply.** Polls inherit object-store round-trip
+  latency. Plan for tens of milliseconds at the median and hundreds at the tail.
+- **No built-in offset tracking.** Log separates data from consumption metadata.
+  Track consumer offsets yourself in a key-value store such as SlateDB.
+
+
+## Explore Log
 
 <CardGroup cols={2}>
   <Card title="Quickstart" icon="rocket" href="/log/quickstart">
@@ -21,6 +67,9 @@ durability with no operational overhead for replication or backups.
   </Card>
   <Card title="Getting to Production" icon="server" href="/log/production">
     Deploy, monitor, and secure Log for production workloads
+  </Card>
+  <Card title="Benchmarks" icon="gauge-high" href="/log/benchmarks">
+    Ingest throughput, poll latency, and cost for a single node
   </Card>
   <Card title="GitHub" icon="github" href="https://github.com/opendata-oss/opendata/tree/main/log">
     View the source code, open issues, and contribute

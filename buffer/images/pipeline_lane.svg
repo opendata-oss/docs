@@ -1,0 +1,127 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="856" height="176" viewBox="0 0 856 176" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="15">
+<style>
+.pill{animation:march 19.2s linear infinite}
+@keyframes march{0%{opacity:1;transform:translateX(0)}0.000%{opacity:1;transform:translateX(0.0px)}6.250%{opacity:1;transform:translateX(72.0px)}12.500%{opacity:1;transform:translateX(144.0px)}18.750%{opacity:1;transform:translateX(216.0px)}25.000%{opacity:1;transform:translateX(360.0px)}31.250%{opacity:1;transform:translateX(513.0px)}37.500%{opacity:1;transform:translateX(571.5px)}43.750%{opacity:1;transform:translateX(639.0px)}50.000%{opacity:1;transform:translateX(706.5px)}53.125%{opacity:1;transform:translateX(724.5px)}56.250%{opacity:0;transform:translateX(751.5px)}56.260%{opacity:0;transform:translateX(0)}100%{opacity:0;transform:translateX(0)}}
+.p0{animation-delay:0.000s}
+.p1{animation-delay:-1.200s}
+.p2{animation-delay:-2.400s}
+.p3{animation-delay:-3.600s}
+.p4{animation-delay:-4.800s}
+.p5{animation-delay:-6.000s}
+.p6{animation-delay:-7.200s}
+.p7{animation-delay:-8.400s}
+.p8{animation-delay:-9.600s}
+.p9{animation-delay:-10.800s}
+.p10{animation-delay:-12.000s}
+.p11{animation-delay:-13.200s}
+.p12{animation-delay:-14.400s}
+.p13{animation-delay:-15.600s}
+.p14{animation-delay:-16.800s}
+.p15{animation-delay:-18.000s}
+</style>
+<rect width="856" height="176" fill="#ffffff"/>
+<text xml:space="preserve" x="14" y="26" fill="#1f2933">  ┌─producer───────────────────────┐    ╭─object store─╮    ┌─consumer─────────────────────┐</text>
+<text xml:space="preserve" x="14" y="44" fill="#1f2933">  │                                │    │              │    │                              │</text>
+<text xml:space="preserve" x="14" y="62" fill="#1f2933">  │                                │    │              │    │                              │</text>
+<text xml:space="preserve" x="14" y="80" fill="#1f2933">  │                                │    │              │    │                              │</text>
+<text xml:space="preserve" x="14" y="98" fill="#1f2933">  │                                ├────▶              ├────▶                              │</text>
+<text xml:space="preserve" x="14" y="116" fill="#1f2933">  │                                │    │              │    │                              │</text>
+<text xml:space="preserve" x="14" y="134" fill="#1f2933">  │ rotate  encode  upload  commit │    │  manifest    │    │ poll  fetch  decode  write   │</text>
+<text xml:space="preserve" x="14" y="152" fill="#1f2933">  └────────────────────────────────┘    ╰──────────────╯    └──────────────────────────────┘</text>
+<g class="pill p0">
+<rect x="43.7" y="31.0" width="66.6" height="54.0" fill="#ffffff"/>
+<text xml:space="preserve" text-anchor="middle" x="77.0" y="44.0" fill="#1f2933">┌─────┐</text>
+<text xml:space="preserve" text-anchor="middle" x="77.0" y="62.0" fill="#1f2933">│ #1  │</text>
+<text xml:space="preserve" text-anchor="middle" x="77.0" y="80.0" fill="#1f2933">└─────┘</text>
+</g>
+<g class="pill p1">
+<rect x="43.7" y="31.0" width="66.6" height="54.0" fill="#ffffff"/>
+<text xml:space="preserve" text-anchor="middle" x="77.0" y="44.0" fill="#1f2933">┌─────┐</text>
+<text xml:space="preserve" text-anchor="middle" x="77.0" y="62.0" fill="#1f2933">│ #16 │</text>
+<text xml:space="preserve" text-anchor="middle" x="77.0" y="80.0" fill="#1f2933">└─────┘</text>
+</g>
+<g class="pill p2">
+<rect x="43.7" y="31.0" width="66.6" height="54.0" fill="#ffffff"/>
+<text xml:space="preserve" text-anchor="middle" x="77.0" y="44.0" fill="#1f2933">┌─────┐</text>
+<text xml:space="preserve" text-anchor="middle" x="77.0" y="62.0" fill="#1f2933">│ #15 │</text>
+<text xml:space="preserve" text-anchor="middle" x="77.0" y="80.0" fill="#1f2933">└─────┘</text>
+</g>
+<g class="pill p3">
+<rect x="43.7" y="31.0" width="66.6" height="54.0" fill="#ffffff"/>
+<text xml:space="preserve" text-anchor="middle" x="77.0" y="44.0" fill="#1f2933">┌─────┐</text>
+<text xml:space="preserve" text-anchor="middle" x="77.0" y="62.0" fill="#1f2933">│ #14 │</text>
+<text xml:space="preserve" text-anchor="middle" x="77.0" y="80.0" fill="#1f2933">└─────┘</text>
+</g>
+<g class="pill p4">
+<rect x="43.7" y="31.0" width="66.6" height="54.0" fill="#ffffff"/>
+<text xml:space="preserve" text-anchor="middle" x="77.0" y="44.0" fill="#1f2933">┌─────┐</text>
+<text xml:space="preserve" text-anchor="middle" x="77.0" y="62.0" fill="#1f2933">│ #13 │</text>
+<text xml:space="preserve" text-anchor="middle" x="77.0" y="80.0" fill="#1f2933">└─────┘</text>
+</g>
+<g class="pill p5">
+<rect x="43.7" y="31.0" width="66.6" height="54.0" fill="#ffffff"/>
+<text xml:space="preserve" text-anchor="middle" x="77.0" y="44.0" fill="#1f2933">┌─────┐</text>
+<text xml:space="preserve" text-anchor="middle" x="77.0" y="62.0" fill="#1f2933">│ #12 │</text>
+<text xml:space="preserve" text-anchor="middle" x="77.0" y="80.0" fill="#1f2933">└─────┘</text>
+</g>
+<g class="pill p6">
+<rect x="43.7" y="31.0" width="66.6" height="54.0" fill="#ffffff"/>
+<text xml:space="preserve" text-anchor="middle" x="77.0" y="44.0" fill="#1f2933">┌─────┐</text>
+<text xml:space="preserve" text-anchor="middle" x="77.0" y="62.0" fill="#1f2933">│ #11 │</text>
+<text xml:space="preserve" text-anchor="middle" x="77.0" y="80.0" fill="#1f2933">└─────┘</text>
+</g>
+<g class="pill p7">
+<rect x="43.7" y="31.0" width="66.6" height="54.0" fill="#ffffff"/>
+<text xml:space="preserve" text-anchor="middle" x="77.0" y="44.0" fill="#1f2933">┌─────┐</text>
+<text xml:space="preserve" text-anchor="middle" x="77.0" y="62.0" fill="#1f2933">│ #10 │</text>
+<text xml:space="preserve" text-anchor="middle" x="77.0" y="80.0" fill="#1f2933">└─────┘</text>
+</g>
+<g class="pill p8">
+<rect x="43.7" y="31.0" width="66.6" height="54.0" fill="#ffffff"/>
+<text xml:space="preserve" text-anchor="middle" x="77.0" y="44.0" fill="#1f2933">┌─────┐</text>
+<text xml:space="preserve" text-anchor="middle" x="77.0" y="62.0" fill="#1f2933">│ #9  │</text>
+<text xml:space="preserve" text-anchor="middle" x="77.0" y="80.0" fill="#1f2933">└─────┘</text>
+</g>
+<g class="pill p9">
+<rect x="43.7" y="31.0" width="66.6" height="54.0" fill="#ffffff"/>
+<text xml:space="preserve" text-anchor="middle" x="77.0" y="44.0" fill="#1f2933">┌─────┐</text>
+<text xml:space="preserve" text-anchor="middle" x="77.0" y="62.0" fill="#1f2933">│ #8  │</text>
+<text xml:space="preserve" text-anchor="middle" x="77.0" y="80.0" fill="#1f2933">└─────┘</text>
+</g>
+<g class="pill p10">
+<rect x="43.7" y="31.0" width="66.6" height="54.0" fill="#ffffff"/>
+<text xml:space="preserve" text-anchor="middle" x="77.0" y="44.0" fill="#1f2933">┌─────┐</text>
+<text xml:space="preserve" text-anchor="middle" x="77.0" y="62.0" fill="#1f2933">│ #7  │</text>
+<text xml:space="preserve" text-anchor="middle" x="77.0" y="80.0" fill="#1f2933">└─────┘</text>
+</g>
+<g class="pill p11">
+<rect x="43.7" y="31.0" width="66.6" height="54.0" fill="#ffffff"/>
+<text xml:space="preserve" text-anchor="middle" x="77.0" y="44.0" fill="#1f2933">┌─────┐</text>
+<text xml:space="preserve" text-anchor="middle" x="77.0" y="62.0" fill="#1f2933">│ #6  │</text>
+<text xml:space="preserve" text-anchor="middle" x="77.0" y="80.0" fill="#1f2933">└─────┘</text>
+</g>
+<g class="pill p12">
+<rect x="43.7" y="31.0" width="66.6" height="54.0" fill="#ffffff"/>
+<text xml:space="preserve" text-anchor="middle" x="77.0" y="44.0" fill="#1f2933">┌─────┐</text>
+<text xml:space="preserve" text-anchor="middle" x="77.0" y="62.0" fill="#1f2933">│ #5  │</text>
+<text xml:space="preserve" text-anchor="middle" x="77.0" y="80.0" fill="#1f2933">└─────┘</text>
+</g>
+<g class="pill p13">
+<rect x="43.7" y="31.0" width="66.6" height="54.0" fill="#ffffff"/>
+<text xml:space="preserve" text-anchor="middle" x="77.0" y="44.0" fill="#1f2933">┌─────┐</text>
+<text xml:space="preserve" text-anchor="middle" x="77.0" y="62.0" fill="#1f2933">│ #4  │</text>
+<text xml:space="preserve" text-anchor="middle" x="77.0" y="80.0" fill="#1f2933">└─────┘</text>
+</g>
+<g class="pill p14">
+<rect x="43.7" y="31.0" width="66.6" height="54.0" fill="#ffffff"/>
+<text xml:space="preserve" text-anchor="middle" x="77.0" y="44.0" fill="#1f2933">┌─────┐</text>
+<text xml:space="preserve" text-anchor="middle" x="77.0" y="62.0" fill="#1f2933">│ #3  │</text>
+<text xml:space="preserve" text-anchor="middle" x="77.0" y="80.0" fill="#1f2933">└─────┘</text>
+</g>
+<g class="pill p15">
+<rect x="43.7" y="31.0" width="66.6" height="54.0" fill="#ffffff"/>
+<text xml:space="preserve" text-anchor="middle" x="77.0" y="44.0" fill="#1f2933">┌─────┐</text>
+<text xml:space="preserve" text-anchor="middle" x="77.0" y="62.0" fill="#1f2933">│ #2  │</text>
+<text xml:space="preserve" text-anchor="middle" x="77.0" y="80.0" fill="#1f2933">└─────┘</text>
+</g>
+</svg>

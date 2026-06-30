@@ -1,0 +1,98 @@
+---
+title: Benchmarks
+description: Ingest throughput, poll latency, and cost for a single-node Log deployment
+---
+
+
+## Throughput
+
+A single `m5n.xlarge` node delivers either high write throughput or a large
+follower fan-out, depending on how you load it:
+
+| Scenario | Result |
+| --- | --- |
+| Pure ingest (no concurrent reads) | ~**100 MB/s** |
+| Read-serving (ingest pushed to drive reads) | 20 MB/s ingest + **50,000 concurrent followers** |
+
+The read-serving configuration sustains 50,000 concurrent followers each tailing
+their own keyed log, with an 8 GB cache and 1M keys, at **&lt;50 ms p50** poll
+latency. Reader nodes scale linearly: add a reader to add read throughput.
+
+## Poll latency
+
+### Flat across key cardinality
+
+At a fixed 20 MB/s ingest, increasing the key count from 100K to 1M does not
+degrade p50 poll latency for reading a single key's log:
+
+<Frame caption="p50 poll latency for a single-key read, swept from 100K to 1M keys at fixed 20 MB/s ingest.">
+  <img src="/log/images/poll-latency-cardinality.svg" alt="Poll latency holding flat near 39 ms as key cardinality grows from 100K to 1M" />
+</Frame>
+
+| Key cardinality | p50 poll latency |
+| --- | --- |
+| 100K | 38.9 ms |
+| 250K | 39.0 ms |
+| 500K | 39.8 ms |
+| 1M | 39.7 ms |
+
+Per-key read latency is independent of how many keys live on the node.
+
+### Scales with ingest rate
+
+Poll latency is sensitive to ingest rate. Below the cache-residency point
+(~5 MB/s) the live tail stays cache-resident and latency is low and flat. Above
+it, ingest evicts hot data before compaction collocates keys, and the tail
+climbs:
+
+<Frame caption="p50 and p99 poll latency versus ingest rate (log scale). The tail diverges past the ~5 MB/s cache-residency point.">
+  <img src="/log/images/poll-latency-ingest.svg" alt="p50 and p99 poll latency rising with ingest rate, p99 climbing toward seconds past 5 MB/s" />
+</Frame>
+
+| Ingest rate | p50 | p99 |
+| --- | --- | --- |
+| 1.25 MB/s | 3 ms | 14 ms |
+| 5 MB/s (cache-residency point) | 4 ms | 22 ms |
+| 10 MB/s | 12 ms | 140 ms |
+| 20 MB/s | 28 ms | 900 ms |
+| 25 MB/s | 36 ms | 2,200 ms |
+
+In practice you can expect p50/p99 poll latencies of ~30 ms / ~300 ms at
+25 MiB/s of throughput. 
+
+### Range vs. random sharding
+
+Scoping a reader to a contiguous key range improves cache locality and thus improves poll latencies. At a fixed 25 MB/s ingest over 1M keys, the difference between different sharding schemes is shown below:
+
+<Frame caption="p50 latency versus reader parallelism. Range-scoped readers stay flat; random sharding degrades.">
+  <img src="/log/images/range-vs-random.svg" alt="p50 latency staying flat for range-scoped readers while random sharding rises with parallelism" />
+</Frame>
+
+| Reader sharding | GETs / op | p50 latency |
+| --- | --- | --- |
+| Range-scoped | 0.07–0.15 | 2.7–3.5 ms |
+| Random | ~0.15 | 3.5–6.4 ms |
+
+Range scoping holds read amplification and latency flat as parallelism grows.
+
+## Cost
+
+The cost breakdown of one fully-loaded node serving 20 MB/s ingest, 50,000 concurrent followers, and 1M keys, with 1 day of retention works out to:
+
+| Line item | Driver | Est. / mo |
+| --- | --- | --- |
+| Compute | 1× `m5n.xlarge`, on-demand | $174 |
+| S3 writes | flush every ~2–3 s ≈ 1.0M PUT | ~$10 |
+| S3 storage | 1.73 TB/day × 1 day | ~$40 |
+| **Total** | compute + S3 | **~$224 / mo** |
+
+GET costs are not included since they are mostly workload dependent. However, if most of your reads are for recent data, they will be served from the local cache. You can add a reader for another ~50k followers at +$174/mo.
+
+Log flushes to S3 approximately every 2–3 s in this configuration. You can
+configure write-ahead-logging for faster durability guarantees at the cost of
+additional S3 `PUT` requests.
+
+## Learn more
+
+- Storage internals: [Log storage design](/log/storage-design) and the [storage RFC](https://github.com/opendata-oss/opendata/blob/main/log/rfcs/0001-storage.md)
+- For the funneling use case, see [OpenData Buffer benchmarks](/buffer/benchmarks)

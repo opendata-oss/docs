@@ -1,14 +1,56 @@
 ---
 title: Timeseries
-description: Object-store-native time series database with Prometheus compatibility
+description: A Prometheus-compatible metrics database on object storage.
 ---
 
-Timeseries is a Prometheus-compatible metrics database built on
+OpenData Timeseries is an MIT-licensed, Prometheus-compatible metrics database built on
 [SlateDB](https://slatedb.io) and object storage. It speaks PromQL, scrapes
-Prometheus targets, accepts OpenTelemetry metrics, and works out of the box
-with Grafana. Because all data is durably stored in object storage, a single
-replica provides full durability with no operational overhead for replication
-or backups.
+Prometheus targets, accepts Prometheus remote write and OTLP metrics, and works
+out of the box with Grafana. It brings the object-store-native operating model,
+ie. stateless compute nodes with object storage as the only durable layer, to the
+Prometheus and Grafana ecosystem.
+
+
+## What it's good at
+
+- **Drop-in Prometheus and Grafana.** PromQL, scraping, remote write, and OTLP
+  ingest, so your existing dashboards and alerts keep working.
+- **High-cardinality ingestion.** Millions of active series on a single stateless
+  writer, scaled by scaling the writer up.
+- **Operational simplicity.** All you need for high-scale metrics is one writer, zero or more readers, and an object store bucket.
+- **Cheap retention.** Local NVMe keeps weeks of recent data warm, while cold
+  data lives on object storage at a large discount to disk-resident storage.
+
+## Why Timeseries
+
+Running Prometheus-compatible systems at scale has meant running an
+unforgiving distributed storage system: quorum replication across stateful
+nodes, shard management, and rebalancing when nodes fail or scale. Thus, whether you self-host
+these systems or pay someone to manage them for you, they can get expensive very fast.
+
+However, once object storage is the only durable layer and local disks are demoted to caches, most of
+the complicated distributed database machinery disappears and the operational cost drops substantially.
+This is what Opendata Timeseries delivers. 
+
+Because there is no replicated, partitioned state to babysit, you can realistically
+run Timeseries yourself and capture the cost gap against managed services. See the
+[benchmarks](/timeseries/benchmarks) for ingestion throughput, query latency, and
+a cost comparison against managed Prometheus offerings.
+
+## Tradeoffs
+
+- **Cold reads pay object-store round trips.** A query for data that isn't cached
+  locally is slower than the same query against a disk-resident system. SlateDB's
+  block cache keeps recent and frequently read data warm, which covers most
+  alerting and dashboard queries.
+- **Higher end-to-end write latency.** Batching writes into immutable objects
+  adds a few seconds before fresh data is queryable. Given scrape intervals are
+  already on the order of a minute, that delay is rarely noticeable for
+  observability.
+ where the most optimization work is happening today.
+
+
+## Explore Timeseries
 
 <CardGroup cols={2}>
   <Card title="Quickstart" icon="rocket" href="/timeseries/quickstart">
@@ -22,6 +64,9 @@ or backups.
   </Card>
   <Card title="Getting to Production" icon="server" href="/timeseries/production">
     Deploy, monitor, and secure Timeseries for production workloads
+  </Card>
+  <Card title="Benchmarks" icon="gauge-high" href="/timeseries/benchmarks">
+    Ingestion throughput, query latency, and cost for a single node
   </Card>
   <Card title="GitHub" icon="github" href="https://github.com/opendata-oss/opendata/tree/main/timeseries">
     View the source code, open issues, and contribute

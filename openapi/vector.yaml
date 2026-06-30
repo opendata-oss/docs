@@ -118,31 +118,69 @@ paths:
       operationId: search
       summary: Search for nearest neighbors
       description: |
-        Find the `k` nearest vectors to a given query vector. Optionally filter
+        Return the top `k` records for a query. Provide exactly one of `vector`
+        (approximate nearest neighbor search) or `bm25` (full-text BM25 search
+        over a text field); the two are mutually exclusive. Optionally filter
         results by metadata attributes using a filter expression.
 
-        The `nprobe` parameter controls how many posting lists are searched.
-        Higher values improve recall at the cost of latency.
+        The `nprobe` parameter controls how many posting lists are searched for
+        ANN queries. Higher values improve recall at the cost of latency.
 
         The `includeFields` parameter controls which attributes are returned
         for each result. When omitted, all attributes are returned.
 
         Supports both binary protobuf (`application/protobuf`) and ProtoJSON
         (`application/protobuf+json`) request bodies.
+      x-codeSamples:
+        - lang: bash
+          label: Full-text (BM25) search
+          source: |
+            curl -X POST http://localhost:8080/api/v1/vector/search \
+              -H 'Content-Type: application/json' \
+              -d '{
+                    "bm25": { "field": "description", "query": "wireless noise cancelling headphones" },
+                    "k": 10,
+                    "filter": { "eq": { "field": "category", "value": "electronics" } }
+                  }'
+        - lang: bash
+          label: Vector (ANN) search
+          source: |
+            curl -X POST http://localhost:8080/api/v1/vector/search \
+              -H 'Content-Type: application/json' \
+              -d '{
+                    "vector": [1.0, 2.0, 3.0],
+                    "k": 10,
+                    "nprobe": 20,
+                    "filter": { "eq": { "field": "category", "value": "electronics" } }
+                  }'
       requestBody:
         required: true
         content:
           application/protobuf+json:
             schema:
               $ref: "#/components/schemas/SearchRequest"
-            example:
-              vector: [1.0, 2.0, 3.0]
-              k: 10
-              nprobe: 20
-              filter:
-                eq:
-                  field: "category"
-                  value: "electronics"
+            examples:
+              ann:
+                summary: Vector (ANN) search
+                value:
+                  vector: [1.0, 2.0, 3.0]
+                  k: 10
+                  nprobe: 20
+                  filter:
+                    eq:
+                      field: "category"
+                      value: "electronics"
+              fullText:
+                summary: Full-text (BM25) search
+                value:
+                  bm25:
+                    field: "description"
+                    query: "wireless noise cancelling headphones"
+                  k: 10
+                  filter:
+                    eq:
+                      field: "category"
+                      value: "electronics"
           application/protobuf:
             schema:
               type: string
@@ -385,23 +423,39 @@ components:
 
     SearchRequest:
       type: object
-      description: Request body for searching nearest neighbors.
+      description: |
+        Request body for searching a collection. Provide exactly one of `vector`
+        (approximate nearest neighbor search) or `bm25` (full-text BM25 search);
+        they are mutually exclusive.
       properties:
         vector:
           type: array
           items:
             type: number
             format: float
-          description: Query vector. Must have the same number of dimensions as the collection.
+          description: Query vector for ANN search. Must have the same number of dimensions as the collection. Provide either this or `bm25`.
+        bm25:
+          type: object
+          description: Full-text BM25 query over a text field. Provide either this or `vector`.
+          properties:
+            field:
+              type: string
+              description: Name of the Text attribute to search.
+            query:
+              type: string
+              description: Query string, tokenized and scored with BM25 against the field.
+          required:
+            - field
+            - query
         k:
           type: integer
           format: uint32
           minimum: 1
-          description: Number of nearest neighbors to return.
+          description: Number of results to return.
         nprobe:
           type: integer
           format: uint32
-          description: Number of posting lists to search. Higher values improve recall at the cost of latency. Optional.
+          description: Number of posting lists to search for ANN queries. Higher values improve recall at the cost of latency. Optional.
         filter:
           $ref: "#/components/schemas/Filter"
         includeFields:
@@ -410,7 +464,6 @@ components:
             type: string
           description: List of attribute field names to include in results. When omitted, all attributes are returned.
       required:
-        - vector
         - k
 
     SearchResult:

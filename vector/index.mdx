@@ -1,17 +1,70 @@
 ---
 title: Vector
-description: Approximate nearest neighbor search on object storage
+description: ANN Vector and full-text search on object storage.
 ---
 
-Vector is a semantic search database built on [SlateDB](https://slatedb.io) and
-object storage. Each database stores documents conforming to a user-defined
-schema. The schema defines fields with various types, along with a "vector" field
-that stores dense vectors with a fixed number of dimensions. Vector serves search
-queries that find the nearst N documents to a given query vector. Because all data
-is durably stored on object storage, a single replica provides full durability
-with no operational overhead for data replication or backups. Writes are limited
-to a single database instance, but queries can be scaled horizontally across
-multiple stateless reader instances.
+Vector is an MIT-licensed, stateless search engine built on
+[SlateDB](https://slatedb.io) and object storage. It stores documents against a
+user-defined schema with dense vector and text fields, and serves both
+approximate nearest neighbor (ANN) search over the vectors and full-text (BM25)
+search over the text. Because all state lives in object storage, any node has
+full access to all data, a single replica is fully durable, and you can scale
+query throughput by adding stateless reader replicas.
+
+
+## What it's good at
+
+- **Online ANN search from object storage.** Warm queries run in the
+  single-digit to low-teens milliseconds while the index lives durably on object
+  storage.
+- **Full-text search.** Text fields are tokenized and BM25-indexed on write, so
+  the same engine serves keyword search alongside vector search, with the same
+  filters and result format. Pair the two for hybrid relevance.
+- **Simple, durable deployment.** A single pod never loses data and fails over in
+  seconds. Read replicas have no communication with the writer, so you scale
+  reads without coordination.
+- **Stable incremental ingest.** A lazy adaptation of the LIRE protocol on top of
+  SlateDB merges keeps ingest throughput steady as the index grows, with no
+  expensive graph rebuilds.
+- **Flexible topologies.** Run embedded in your application, as a single node,
+  as a writer with read replicas, or with buffered ingest through
+  [OpenData Buffer](/buffer).
+
+## Why Vector
+
+Vector fills the gap between running `pgvector` and `pg_search` yourself and paying a vendor many
+multiples of hardware cost to operate a search database for you. 
+
+A truly stateless architecture is what makes Vector cheaper and easier to operate
+than earlier vector databases. Any node can serve any data, so
+there are no shard assignments to manage and no rebalancing when nodes come and
+go. The index is an inverted file (IVF/SPANN) tuned for object storage: it
+batch-loads index data per round trip rather than making the sequential,
+hop-by-hop reads a graph index requires, so cold queries stay fast despite
+object-store latency.
+
+Reads and writes are fully decoupled, so you can capacity-plan ingest and query
+independently. See the [benchmarks](/vector/benchmarks) for recall, warm and cold
+query latency, ingest throughput, and cost across standard datasets, along with a
+harness you can point at your own data.
+
+## Tradeoffs
+
+- **Warm versus cold latency.** IVF scores more vectors than a graph index like
+  HNSW, so warm queries are in the milliseconds rather than sub-millisecond. In
+  exchange, cold queries stay sub-second where a cold HNSW graph can take dozens
+  of seconds to load.
+- **Write latency.** Vector batches writes to amortize object-store PUTs and
+  indexing work, so a write can take up to about a second to acknowledge. Putting
+  Buffer in front cuts that to roughly a hundred milliseconds, without
+  read-your-writes.
+- **Attribute filtering on vector queries.** Filters run after the ANN index
+  yields candidates, so recall on heavily filtered vector queries can suffer.
+- **No single-query hybrid search.** ANN and BM25 scores are not comparable, so a
+  query scores by one or the other. To blend semantic and keyword relevance, run
+  both and fuse the result lists client-side.
+
+## Explore Vector
 
 <CardGroup cols={2}>
   <Card title="Quickstart" icon="rocket" href="/vector/quickstart">
@@ -31,6 +84,9 @@ multiple stateless reader instances.
   </Card>
   <Card title="Getting to Production" icon="server" href="/vector/production">
     Deploy, monitor, and secure Vector for production workloads
+  </Card>
+  <Card title="Benchmarks" icon="gauge-high" href="/vector/benchmarks">
+    Query latency, ingest throughput, and cost across ANN datasets
   </Card>
   <Card title="GitHub" icon="github" href="https://github.com/opendata-oss/opendata/tree/main/vector">
     View the source code, open issues, and contribute
