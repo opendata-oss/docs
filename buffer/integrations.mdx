@@ -1,0 +1,137 @@
+---
+title: Integrations
+description: First-party producer and consumer integrations for Buffer.
+---
+
+The core Buffer library just provides APIs for reading and writing from S3. A working Buffer pipeline needs to build on these APIs to be useful. OpenData ships the following first-party
+integrations for both the production and consumption sides:
+
+- **Producer side:** A pipelined producer runtime with the [OpenData OTel exporter](#producer-side-the-opendata-otel-exporter)
+  in [`opendata-go`](https://github.com/opendata-oss/opendata-go). This allows your OTel Collector to emit high volume logs, metrics, and traces to S3 via Buffer.
+- **Consumer side:** 
+  - An extensible [pipelined consumer runtime](#consumer-side-the-generic-ingest-runtime)
+  in [`opendata-contrib`](https://github.com/opendata-oss/opendata-contrib) along with a high volume
+  [ClickHouse sink](#clickhouse-sink-clickhouse-ingestor) built on it.
+  - OpenData Timeseries has a native [Buffer Consumer](/timeseries/ingest) that can ingests metrics from Buffer.
+
+Both are MIT-licensed.
+
+
+## Producer Integrations
+
+### OTel Collector Exporter
+
+The exporter is a normal OpenTelemetry Collector exporter. It serializes each
+OTLP request as protobuf, hands it to the [pipelined Buffer producer](https://github.com/opendata-oss/opendata-go#producer-architecture),
+and returns success to the collector pipeline only after the batch is durable
+(the data object is `PUT` and its metadata lands in the manifest via a CAS operation). 
+
+You configure it like any other collector exporter, pointing it at an object
+store bucket and the manifest and data paths for the data type in question:
+
+```yaml
+exporters:
+  opendata/logs:
+    object_store:
+      type: s3
+      bucket: my-otel-logs-bucket
+      region: us-west-2
+    data_path_prefix: ingest/otel/logs/data
+    manifest_path: ingest/otel/logs/manifest
+
+service:
+  pipelines:
+    logs:
+      exporters: [opendata/logs]
+```
+
+The flush thresholds, compression, and pipelining knobs all have defaults. Checkout the
+[exporter README](https://github.com/opendata-oss/opendata-go/tree/main/exporter/opendataexporter)
+for the full config reference.
+
+<Note>
+  Stock `otelcol-contrib` does not bundle the exporter. Use the pre-built
+  collector image at `ghcr.io/opendata-oss/otel-collector`, or build a custom
+  collector distribution with the OpenTelemetry Collector Builder. See the
+  [otel-collector image docs](https://github.com/opendata-oss/opendata-go/tree/main/otel-collector).
+</Note>
+
+## Consumer Integrations
+
+### The generic consumer runtime
+
+The [consumer runtime](https://github.com/opendata-oss/opendata-contrib/tree/main/runtime/opendata-ingest-runtime)
+provides the framework to read from a Buffer queue and write to a configured sink. It provides the following machinery that can be reused to write to any sink.
+
+- **Pipelined stages.** Fetch, decode, and sink commit run as separate stages
+  with bounded queues between them using Buffer's [read-ahead consumer API](/buffer/architecture#read-ahead-and-batched-acks).
+- **Byte-budgeted backpressure.** In-flight bytes are bounded per source.
+-  **Contiguous-completion ack.** The runtime ensures that only data batches that have been committed to the sink are dequeued and removed from object storage. It is designed to handle out of order acknowledgments. 
+
+A concrete sink needs to implements the `Sink` trait along with the appropriate decoders. For more details, please read the design in
+[RFC 0002](https://github.com/opendata-oss/opendata-contrib/blob/main/rfcs/0002-generic-ingest-runtime.md).
+The `Sink` trait API is documented in the [runtime README](https://github.com/opendata-oss/opendata-contrib/tree/main/runtime/opendata-ingest-runtime).
+
+### ClickHouse sink 
+
+[`clickhouse-ingestor`](https://github.com/opendata-oss/opendata-contrib/tree/main/connectors/clickhouse-ingestor)
+is the first packaged connector. It wires the ingest runtime to the OTLP-logs
+decoder and a ClickHouse `Sink`, consuming OTLP logs from a Buffer queue and
+inserting them into a `ReplacingMergeTree` table. Each source range carries a
+deterministic idempotency token, so retries and replays collapse to effective
+exactly-once on merge. It ships as a pre-built binary and a container image.
+
+
+- The [local tutorial](https://github.com/opendata-oss/opendata-contrib/tree/main/tutorial)
+  runs the whole OTel-to-ClickHouse pipeline on your laptop with `docker compose
+  up` and a synthetic load generator.
+- The [clickhouse-ingestor README](https://github.com/opendata-oss/opendata-contrib/tree/main/connectors/clickhouse-ingestor)
+  is the production operator guide: table DDL, the full config reference,
+  deployment, dry-run validation, metrics, and troubleshooting.
+
+
+## End-to-End Example
+
+A complete brokerless pipeline for ingesting OTel Data to ClickHouse using Buffer looks like this:
+
+<pre className="ascii-art">{`
+   ┌─────────────┐             ┌─────────────────────┐
+   │ OTel source │             │   otel-collector    │
+   │             ├──OTLP/gRPC──▶ (OpenData exporter) │
+   └─────────────┘             └──────────┬──────────┘
+                                          │
+                                writes batches
+                                    │
+                        ╔═══════════▼══════════╗
+                        ║    Object storage    ║░
+                        ║                      ║░
+                        ║     Buffer queue     ║░
+                        ║ (manifest + batches) ║░
+                        ╚═══════════┬══════════╝░
+                         ░░░░░░░░░░░│░░░░░░░░░░░░
+                                 reads
+                                   │
+                                   │
+                        ┌──────────▼──────────┐             ┌────────────┐
+                        │ clickhouse-ingestor ├───inserts───▶ ClickHouse │
+                        └─────────────────────┘             └────────────┘
+`}</pre>
+
+There is no broker on the path. The collector and the ingestor coordinate only
+through one manifest object in object storage, with no direct network connection
+between them. To run the whole thing on your laptop in about two minutes, follow
+the [local tutorial](https://github.com/opendata-oss/opendata-contrib/tree/main/tutorial)
+(`docker compose up`, then a synthetic OTLP load generator).
+
+
+## Build your own integration
+
+Both the producer and consumer runtimes are modular and are designed to be extended. 
+
+- For A new sink (Iceberg, Postgres, a file format), implement the `Sink` trait
+  from the ingest runtime in a fresh crate. 
+- For a new OTel singnal into ClickHouse (OTLP traces, your own protobuf), implement a
+  `Decoder` and an `Adapter` against the existing ClickHouse pipeline. 
+
+Start from [RFC 0002](https://github.com/opendata-oss/opendata-contrib/blob/main/rfcs/0002-generic-ingest-runtime.md)
+and the [runtime README](https://github.com/opendata-oss/opendata-contrib/tree/main/runtime/opendata-ingest-runtime).

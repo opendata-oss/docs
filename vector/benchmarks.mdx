@@ -3,11 +3,9 @@ title: Benchmarks
 description: Query latency, ingest throughput, and cost for OpenData Vector across standard ANN datasets
 ---
 
-These are the published benchmark results for OpenData Vector, measured on a
+These are the benchmark results for OpenData Vector were measured on a
 single `c6id.4xlarge` node against standard Approximate Nearest Neighbor (ANN)
-datasets. They first appeared in the launch post,
-[OpenData Vector: MIT-licensed Vector Search on Object Storage](https://www.opendata.dev/blog/introducing-vector).
-You can reproduce them, or run the same measurements against your own data, with
+datasets. You can reproduce them, or run the same measurements against your own data, with
 [Vector Bench](#run-it-on-your-own-data).
 
 All latencies were recorded at a steady-state query throughput of **32 queries/s
@@ -15,6 +13,8 @@ at 90% recall** (SIFT 1M was recorded at 97% recall). Reported ingestion
 throughput is the steady-state throughput for each dataset in isolation.
 
 ## Query latency
+
+Here is the query latencies for different standard vector data sets, split by cold and warm latency. 
 
 <Frame caption="Warm and cold query latency, and ingest throughput, across standard ANN datasets.">
   <img src="/vector/images/latency-throughput.png" alt="Query latency and ingest throughput across ANN datasets" />
@@ -31,9 +31,6 @@ in the in-memory cache, so latency reflects how fast Vector loads postings and
 scores candidates. Larger datasets score more postings to reach high recall, and
 some of those reads come from local disk cache, which adds delay.
 
-The IVF index trades in both directions here. Warm queries run in ~10 ms rather
-than the sub-millisecond of an HNSW graph index, but cold queries stay
-sub-second where a cold HNSW graph can take dozens of seconds to load.
 
 ## Ingest throughput
 
@@ -48,7 +45,7 @@ LIRE compaction protocol ingests incrementally.
 
 Ingestion is bottlenecked on (1) traversing the centroid index to assign vectors
 to postings and (2) computing new clusters when centroids split during LIRE.
-More vectors means more centroids to search; more dimensions makes distance
+More vectors means more centroids to search while more dimensions makes distance
 computation more expensive.
 
 ## Cost
@@ -67,12 +64,9 @@ into roughly one SlateDB write per second.
 
 ## Run it on your own data
 
-The most common question after launch was "how will it perform and what will it
-cost for *my* workload?". To answer that, the benchmark harness is open source:
+The benchmark harness is open source:
 [`vector/bench/`](https://github.com/opendata-oss/opendata/tree/main/vector/bench)
-in the OpenData repository. The
-[Vector Bench launch post](https://www.opendata.dev/blog/vector-bench) walks
-through it.
+in the OpenData repository. 
 
 Vector Bench runs each dataset through three independent phases, since Vector's
 design fully decouples read and write workloads so you can capacity-plan them
@@ -105,18 +99,3 @@ store and takes ~20 seconds on a laptop. See the
 [README](https://github.com/opendata-oss/opendata/blob/main/vector/bench/README.md)
 for configuring larger runs against a real object store, and for the bundled
 Claude Skill that infers a config from your raw data.
-
-### Caveats
-
-Vector is early. A few limits to keep in mind when reading these numbers:
-
-- **Metadata filters** are applied after the ANN index yields candidates, so
-  recall on filtered queries can be poor. Native attribute filtering is on the
-  near-term roadmap.
-- **No deletes or mixed updates** in the ingest phase; it scans and ingests
-  vectors only.
-- **No mixed read/write**: phases are sequential. In practice ingest and query
-  are capacity-planned separately because the architecture isolates them.
-- **Embedded only**: the benchmark runs Vector in embedded mode rather than
-  standing up a server. Server overhead is expected to be minimal relative to
-  indexing and index traversal, so the numbers should still be representative.

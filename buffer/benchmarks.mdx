@@ -3,22 +3,14 @@ title: Benchmarks
 description: End-to-end latency, throughput, and cost for Buffer pipelines on object storage
 ---
 
-These are the published benchmark results for OpenData Buffer. There are two
-runs: the original telemetry-pipeline benchmark from the launch post, and a
-higher-throughput run that moves 1.1 Gbps of logs into ClickHouse with the
-pipelined clients.
+This page contains two benchmarks. The first measures throughput and latency of multiple OTel Collectors writing metric data to OpenData Timeseries.
+The second measures the throughput and latency of a single Otel Collector writing log data to Clickhouse. 
 
-Because Buffer replaces a system like Kafka with object storage, every result
-includes a cost comparison against managed and self-hosted Kafka at the same
-throughput.
+## Writing Metrics to OpenData Timeseries 
 
-## Telemetry pipeline (30 MB/s)
-
-From the launch post,
-[OpenData Buffer: HA pipelines without Kafka](https://www.opendata.dev/blog/buffer-ha-pipelines-without-kafka).
-An 8-hour experiment ran three Buffer producers, each producing 10 MB/s (30 MB/s
+We ran an 8-hour experiment running three Buffer producers, each producing 10 MB/s (30 MB/s
 total), with flush and poll intervals of 100 ms. Latency is measured from the
-producer receiving a data entry to the consumer reading it.
+producer receiving a data entry to the Buffer consumer reading it.
 
 | Metric | Result |
 | --- | --- |
@@ -46,48 +38,26 @@ S3 costs over the experiment, projected to a monthly bill:
 | Storage | 27.54 GB (max during run) | $0.023 / GB | $0.63 |
 | **Total** | | | **~$91.40** |
 
-| Service | MiB/s | Cost / month |
-| --- | --- | --- |
-| **OpenData Buffer** | 30 | **$90** |
-| [WarpStream](https://www.warpstream.com/pricing) | 30 | $1,300 |
-| [Self-hosted Apache Kafka](https://2minutestreaming.com/tools/apache-kafka-calculator/) | 30 | $8,500 |
+## OTel → ClickHouse pipeline
 
-## OTel → ClickHouse pipeline (1.1 Gbps)
-
-From [Ingesting 1Gbps of logs into ClickHouse for $180/month](https://www.opendata.dev/blog/ingesting-1gbps-logs-to-clickhouse).
-A single loadgen drove 175,000 log records/sec into one OTel gateway pod over
-OTLP/gRPC. The gateway ran the
-[OpenData producer](https://github.com/opendata-oss/opendata-go#producer-architecture),
-which batched, encoded, and appended OTel payloads to Buffer on S3. A separate
+This benchmark used the pipelined producer and consumer runtimes to measure the maximum throughput of writing Logs 
+from an Otel Collector to Clickhouse. A single loadgen drove 175,000 log records/sec into one OTel gateway pod over
+OTLP/gRPC. The gateway ran the [OpenData producer](https://github.com/opendata-oss/opendata-go#producer-architecture),
+which appended OTel payloads to Buffer on S3. A separate
 node running the
 [ClickHouse ingestor](https://github.com/opendata-oss/opendata-contrib/tree/main/connectors/clickhouse-ingestor)
-consumed the payloads and inserted them into ClickHouse. End-to-end latency was
+consumed the payloads and inserted them into ClickHouse. 
+
+End-to-end latency was
 measured from two timestamps stamped onto each record (`_odb_gateway_received_at`
-at the gateway, `_odb_clickhouse_inserted_at` at INSERT time).
+at the gateway, `_odb_clickhouse_inserted_at` at INSERT time). Latency was the difference between these two values, 
+computed via a query on Clickhouse. Both components, the OTel exporter and the ClickHouse ingestor, are documented on the
+[Integrations](/buffer/integrations) page.
 
 <Frame caption="Throughput and end-to-end latency over the 1.1 Gbps OTel → ClickHouse run.">
   <img src="/buffer/images/throughput_e2e_latency.png" alt="Throughput holding at 1.1 Gbps with stable end-to-end latency over the run" />
 </Frame>
 
-| Metric | Result |
-| --- | --- |
-| Throughput | 1.1 Gbps compressed (175,000 records/sec) |
-| p50 end-to-end latency | ~2.8 s |
-| p99 end-to-end latency | ~10 s |
-| Producer / consumer nodes | 2× (4 vCPU + 8 GB RAM) |
-| Monthly cost (S3) | $180 |
-
-This run uses the pipelined producer and consumer clients. S3 has high
-per-request latency but enormous aggregate bandwidth, so both runtimes keep many
-overlapping requests in flight. On the producer side an accumulator batches
-records, two threadpools encode/compress and upload in parallel, and a single
-thread commits batches to the manifest with a compare-and-set (CAS). Amortizing
-the CAS over multiple large batches is what unlocks throughput: on average 1.3
-16 MB batches were committed per CAS.
-
-<Frame caption="Pipelined producer and consumer lanes against object storage.">
-  <img src="/buffer/images/pipeline_lane.svg" alt="Producer and consumer runtimes running parallel encode, upload, fetch, and decode lanes against S3" />
-</Frame>
 
 ### Cost
 
@@ -99,20 +69,10 @@ the CAS over multiple large batches is what unlocks throughput: on average 1.3
 | Network — in-region via S3 Gateway endpoint | — | $0 | $0 |
 | **Total** | | | **~$180** |
 
-The same workload would cost **$24,667/mo on Apache Kafka** (via the
-[AKalculator](https://2minutestreaming.com/tools/apache-kafka-calculator/)) and
-**$8,867/mo on WarpStream** at the Fundamentals Tier.
-
-## A note on latency
-
-Buffer's two-S3-hop design (batch to object storage, poll the manifest) is
-structurally slower than replicating data in memory the way Kafka does. In
-practice that still means p99 latencies under 2 s for the telemetry workload,
-which is acceptable for most observability and telemetry pipelines. The
-latency/cost tradeoff is configurable through the flush and poll intervals.
 
 ## Reproduce it
 
+- Setup for both components: [Buffer integrations](/buffer/integrations)
 - Producer client and OTel exporter: [opendata-go](https://github.com/opendata-oss/opendata-go#producer-architecture)
 - ClickHouse ingestor: [opendata-contrib](https://github.com/opendata-oss/opendata-contrib/tree/main/connectors/clickhouse-ingestor)
 - 5-minute local OTel → ClickHouse pipeline: [tutorial](https://github.com/opendata-oss/opendata-contrib/tree/main/tutorial)

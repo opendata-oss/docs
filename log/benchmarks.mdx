@@ -3,11 +3,6 @@ title: Benchmarks
 description: Ingest throughput, poll latency, and cost for a single-node Log deployment
 ---
 
-These are the published benchmark results for OpenData Log. All numbers come
-from real traffic on a single `m5n.xlarge` instance running against AWS S3, with
-the event distribution randomly sampled by key. They first appeared in the
-launch post,
-[Kafka's Broken Promise: There is No Goldilocks Log](https://www.opendata.dev/blog/announcing-opendata-log).
 
 ## Throughput
 
@@ -63,14 +58,11 @@ climbs:
 | 25 MB/s | 36 ms | 2,200 ms |
 
 In practice you can expect p50/p99 poll latencies of ~30 ms / ~300 ms at
-25 MiB/s of throughput. The workaround for the tail is scoping read replicas to
-smaller key ranges so the cache isn't thrashed by blocks from unrelated ranges.
+25 MiB/s of throughput. 
 
 ### Range vs. random sharding
 
-Scoping a reader to a contiguous key range improves cache locality versus
-hash/random sharding. At a fixed 25 MB/s ingest over 1M keys, sweeping the
-parallelism factor:
+Scoping a reader to a contiguous key range improves cache locality and thus improves poll latencies. At a fixed 25 MB/s ingest over 1M keys, the difference between different sharding schemes is shown below:
 
 <Frame caption="p50 latency versus reader parallelism. Range-scoped readers stay flat; random sharding degrades.">
   <img src="/log/images/range-vs-random.svg" alt="p50 latency staying flat for range-scoped readers while random sharding rises with parallelism" />
@@ -81,12 +73,11 @@ parallelism factor:
 | Range-scoped | 0.07–0.15 | 2.7–3.5 ms |
 | Random | ~0.15 | 3.5–6.4 ms |
 
-Range scoping holds read amplification and latency flat as parallelism grows;
-random sharding degrades.
+Range scoping holds read amplification and latency flat as parallelism grows.
 
 ## Cost
 
-One fully-loaded read-serving node, with 1 day of retention:
+The cost breakdown of one fully-loaded node serving 20 MB/s ingest, 50,000 concurrent followers, and 1M keys, with 1 day of retention works out to:
 
 | Line item | Driver | Est. / mo |
 | --- | --- | --- |
@@ -95,24 +86,13 @@ One fully-loaded read-serving node, with 1 day of retention:
 | S3 storage | 1.73 TB/day × 1 day | ~$40 |
 | **Total** | compute + S3 | **~$224 / mo** |
 
-That box buys 20 MB/s ingest, 50,000 concurrent followers, and 1M keys. Compute
-is the whole bill; S3 is a rounding error. GETs for your read pattern sit
-outside the total since most reads hit the 8 GB cache and stay
-workload-dependent. Add a reader for another ~50k followers at +$174/mo.
+GET costs are not included since they are mostly workload dependent. However, if most of your reads are for recent data, they will be served from the local cache. You can add a reader for another ~50k followers at +$174/mo.
 
 Log flushes to S3 approximately every 2–3 s in this configuration. You can
 configure write-ahead-logging for faster durability guarantees at the cost of
 additional S3 `PUT` requests.
 
-## Tradeoffs
-
-Poll latencies scale with the rate of ingestion: higher ingest evicts hot data
-before compaction can collocate keys for efficient querying. Log also inherits
-object-storage latency floors. The mitigation is range-scoped read replicas, as
-shown above.
-
 ## Learn more
 
 - Storage internals: [Log storage design](/log/storage-design) and the [storage RFC](https://github.com/opendata-oss/opendata/blob/main/log/rfcs/0001-storage.md)
-- Scaling without data shuffles: [SlateDB clones](https://slatedb.io/docs/design/clones/)
 - For the funneling use case, see [OpenData Buffer benchmarks](/buffer/benchmarks)

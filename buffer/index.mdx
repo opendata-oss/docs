@@ -1,36 +1,21 @@
 ---
 title: Buffer
-description: An MIT-licensed, stateless buffer that turns object storage into a low-latency queue, replacing Kafka for telemetry pipelines
+description: An MIT-licensed, stateless buffer that turns object storage into a low-latency queue, replacing Kafka for many high throughput pipelines.
 ---
 
 Buffer is an MIT-licensed, stateless library that uses object storage as a
 durable queue between producers and consumers. Producers batch opaque byte
-entries and flush them to object storage as append-only data files; a single
-manifest coordinates producers and consumers through atomic compare-and-set.
+entries and flush them to object storage as append-only data files. 
+Consumers pull batches directly from objectstorage. A single
+manifest coordinates producers and consumers through atomic compare-and-set operations.
 Because both the data and the manifest live in object storage, Buffer is
 stateless and horizontally scalable, and it leaves durability and availability
 to S3.
 
-The Kafka protocol does two hard things well: it stores ordered data with
-optional transactional semantics, and it tracks consumption so consumer groups
-can collaborate. Telemetry and event data need neither. A log line or a metric
-sample has no causal relationship to the records around it. By skipping the
-distributed-systems machinery those guarantees require, Buffer stays far simpler
-and cheaper than a full log.
 
 ## What it's good at
 
-- **Telemetry and event pipelines.** Logs, metrics, and clickstream data on
-  their way to a database or warehouse, where strict global ordering and
-  transactional produce aren't required.
-- **High-availability zonal ingest.** Stateless ingestors run in each
-  availability zone, batching and writing to object storage with no cross-AZ
-  network charges and at-least-once delivery.
-- **High throughput.** Three zonal writers scale past several Gbps, so most
-  pipelines never need partitioning.
-- **Pluggable sinks.** A native OpenTelemetry exporter on the producer side, a
-  pipelined consumer runtime, and a ClickHouse integration today, with Iceberg
-  and other destinations on the roadmap.
+Buffer was built for high throughput data pipeliens which don't need strict ordering and where sink-side deduplication is acceptable. This describes a vast majority of observability and event pipelines, like those shipping logs, metrics, and traces to observability stores. Or if you need to ship clicksteram data to systems like Clickhouse, etc.
 
 ## Why Buffer
 
@@ -39,7 +24,7 @@ low-latency queue. That focus is the reason it costs a small fraction of a
 managed or self-hosted Kafka cluster for the same throughput. The ingestors are
 stateless, so you scale and fail over by adding or replacing pods rather than
 rebalancing a stateful cluster. The manifest's compare-and-set gives you
-at-least-once delivery and fences zombie collectors to avoid split-brain.
+at-least-once delivery and fences zombie clients.
 
 The pipelined producer and consumer clients keep many object-storage requests in
 flight at once, and each data batch carries a stable identity across retries so
@@ -66,6 +51,9 @@ latency, throughput, and a cost comparison against Kafka.
   </Card>
   <Card title="Configuration" icon="gear" href="buffer/configuration">
     How to configure producers and consumers
+  </Card>
+  <Card title="Integrations" icon="plug" href="buffer/integrations">
+    The OTel exporter and the ClickHouse ingest runtime
   </Card>
   <Card title="Benchmarks" icon="gauge-high" href="buffer/benchmarks">
     End-to-end latency, throughput, and cost versus Kafka

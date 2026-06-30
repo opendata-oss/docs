@@ -2,7 +2,7 @@
 
 ## About this project
 
-This is the documentation site for [OpenData](https://github.com/opendata-oss/opendata), built on [Mintlify](https://mintlify.com). OpenData is a family of four databases — Timeseries, Log, Vector, and Key-Value — that share a common storage foundation built on [SlateDB](https://github.com/slatedb/slatedb), an object-store-native LSM tree.
+This is the documentation site for [OpenData](https://github.com/opendata-oss/opendata), built on [Mintlify](https://mintlify.com). OpenData is a family of databases — Timeseries, Log, and Vector — that share a common storage foundation built on [SlateDB](https://github.com/slatedb/slatedb), an object-store-native LSM tree, plus Buffer, a stateless ingestion buffer on object storage.
 
 - Pages are MDX files with YAML frontmatter
 - Configuration lives in `docs.json`
@@ -25,8 +25,8 @@ Use these as primary sources when writing documentation content.
 - **SlateDB** — the shared LSM-tree storage engine; always capitalize the S and DB
 - **Timeseries** (or **TSDB**) — the time series database; one word, capital T and S
 - **Log** — the event streaming database; capitalize when referring to the database
-- **Vector** — the approximate nearest neighbor search database
-- **Key-Value** — the simple key-value store; always hyphenated
+- **Vector** — the vector and full-text search database
+- **Buffer** — the stateless ingestion buffer on object storage
 
 ## Style preferences
 

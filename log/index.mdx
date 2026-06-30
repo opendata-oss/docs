@@ -1,6 +1,6 @@
 ---
 title: Log
-description: A key-oriented, object-native log for routing events to addressable destinations
+description: A key-oriented, objectstore-native log for routing events to addressable destinations
 ---
 
 Log is an MIT-licensed, key-oriented log built on [SlateDB](https://slatedb.io)
@@ -9,12 +9,6 @@ a single node and scales to tens of thousands of active readers, each tailing
 its own key. It runs as a single Rust binary with object storage as its only
 durability requirement.
 
-Kafka was built to *funnel*: collect data from many high-cardinality sources and
-coalesce it onto one low-cardinality pipe. Log is built for the other half of
-logging, *routing*: delivering events from addressable sources to addressable
-destinations. If your consumers each care about a specific subset of keys, a
-partitioned log makes you scan a whole partition to find one key's data. Log
-addresses data by key instead.
 
 ## What it's good at
 
@@ -32,11 +26,14 @@ addresses data by key instead.
 
 ## Why Log
 
-Keys are a better data model than topic-partitions for routing. You address the
-log by key and get ordered values back, with no partition in the call and no
-consumer offsets to rewrite when you split or merge. Because Log builds on
-SlateDB, you can split a node with a metadata-only operation and point consumers
-at the new instance to resume from the same offset, with no data shuffle.
+Kafka was built to collect data from many high-cardinality sources and
+coalesce it onto one low-cardinality pipe. Log is built for the other half of
+logging, *routing*: delivering events from granular  sources to granular 
+destinations. 
+
+If your consumers each care about a specific subset of keys, you want to be able to retrieve 
+the events for a key as efficiently as possible. That's why Log addresses events by key rather 
+than topic-partitions. You simply `scan` the Log by key and get ordered values back.
 
 Object storage as the only durable layer makes Log strongly consistent and cheap
 to operate. Read replicas scale linearly, and scoping a replica to a
@@ -46,7 +43,7 @@ cost on a single node.
 
 ## Tradeoffs
 
-- **Poll latency scales with ingest rate.** Higher ingest evicts hot data before
+- **Poll latency scales with ingest rate.** Higher ingest rates evicts hot data before
   compaction can collocate keys for efficient querying. The mitigation is scoping
   read replicas to smaller key ranges so the cache isn't thrashed by unrelated
   blocks.

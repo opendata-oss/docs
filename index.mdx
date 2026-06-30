@@ -17,10 +17,10 @@ title: Introduction
 ┃                        ║   Storage  ║▒                         ┃
 ┃                        ║            ║▒                         ┃
 ┃                        ╚════════════╝▒                         ┃
-┃   ╔log═════════╗        ▒▒▒▒▒▒▲▒▒▒▒▒▒▒      ╔key-value═══╗     ┃
-┃   ║ ┌────────┐ ║▒             │             ║ ┌────────┐ ║▒    ┃
-┃   ║ │slateDB │ ║──────────────┴─────────────║ │slateDB │ ║▒    ┃
-┃   ║ └────────┘ ║▒                           ║ └────────┘ ║▒    ┃
+┃   ╔log═════════╗        ▒▒▒▒▒▒▲▒▒▒▒▒▒▒      ╔════════════╗     ┃
+┃   ║ ┌────────┐ ║▒             │             ║            ║▒    ┃
+┃   ║ │slateDB │ ║──────────────┴─────────────║   Buffer   ║▒    ┃
+┃   ║ └────────┘ ║▒                           ║            ║▒    ┃
 ┃   ╚════════════╝▒                           ╚════════════╝▒    ┃
 ┃    ▒▒▒▒▒▒▒▒▒▒▒▒▒▒                            ▒▒▒▒▒▒▒▒▒▒▒▒▒▒    ┃
 ┃                                                                ┃
@@ -67,10 +67,7 @@ operational experience.
   <Card title="Vector" icon="brain" href="/vector">
     SPANN-style approximate nearest neighbor search
   </Card>
-  <Card title="Key-Value" icon="key" href="/keyvalue">
-    Simple, low-latency key-value storage
-  </Card>
-  <Card title="Buffer" icon="key" href="/buffer">
+  <Card title="Buffer" icon="inbox" href="/buffer">
     Highly-available ingestion buffer
   </Card>
 </CardGroup>

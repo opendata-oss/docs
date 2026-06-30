@@ -36,6 +36,7 @@ a type, and a flag indicating whether it is **indexed**.
 | **Int64**   | 64-bit signed integer      |
 | **Float64** | 64-bit floating point      |
 | **Bool**    | Boolean                    |
+| **Text**    | UTF-8 text, tokenized and full-text indexed for BM25 search |
 
 #### Indexed vs. non-indexed attributes
 
@@ -48,6 +49,14 @@ filtering during queries — for example, filtering results where
 Non-indexed attributes are stored with the record but cannot be used in filter
 predicates efficiently. Use non-indexed attributes for data that you want to
 retrieve but don't need to filter on.
+
+### Text fields
+
+Attributes of type **Text** are always full-text indexed; the `indexed` flag does
+not apply to them. On write, Vector tokenizes the text and maintains a BM25 index
+over its terms. A query can then score records by BM25 relevance against a text
+field instead of by vector similarity, which makes Vector usable for keyword
+search as well as semantic search. The two scoring modes are separate per query.
 
 ### Vector
 

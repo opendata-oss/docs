@@ -91,19 +91,13 @@
         ]
       },
       {
-        "group": "Key-Value",
-        "icon": "key",
-        "pages": [
-          "keyvalue/index"
-        ]
-      },
-      {
         "group": "Buffer",
-        "icon": "right-to-bracket",
+        "icon": "inbox",
         "pages": [
           "buffer/index",
           "buffer/architecture",
           "buffer/configuration",
+          "buffer/integrations",
           "buffer/benchmarks"
         ]
       }
