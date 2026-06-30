@@ -6,20 +6,21 @@ description: An MIT-licensed, stateless buffer that turns object storage into a 
 Buffer is an MIT-licensed, stateless library that uses object storage as a
 durable queue between producers and consumers. Producers batch opaque byte
 entries and flush them to object storage as append-only data files. 
-Consumers pull batches directly from objectstorage. A single
-manifest coordinates producers and consumers through atomic compare-and-set operations.
-Because both the data and the manifest live in object storage, Buffer is
+Consumers pull batches directly from object storage.  A single manifest file on object storage coordinates producers 
+and consumers through atomic compare-and-set operations. The producer and consumer 
+frameworks are extensible and can accommodate a variety of data types and source and 
+destination systems. And because both the data and the manifest live in object storage, Buffer is
 stateless and horizontally scalable, and it leaves durability and availability
 to S3.
 
 
 ## What it's good at
 
-Buffer was built for high throughput data pipeliens which don't need strict ordering and where sink-side deduplication is acceptable. This describes a vast majority of observability and event pipelines, like those shipping logs, metrics, and traces to observability stores. Or if you need to ship clicksteram data to systems like Clickhouse, etc.
+Buffer was built for high throughput data pipelines which don't need strict ordering and where sink-side deduplication is acceptable. This describes a vast majority of observability and event pipelines, like those shipping metric, event, log, and trace data to observability and analytics stores. 
 
 ## Why Buffer
 
-Buffer does one thing: it makes object storage usable as a moderately
+Buffer's only goal is to make object storage usable as a high volume and moderately
 low-latency queue. That focus is the reason it costs a small fraction of a
 managed or self-hosted Kafka cluster for the same throughput. The ingestors are
 stateless, so you scale and fail over by adding or replacing pods rather than
@@ -27,8 +28,8 @@ rebalancing a stateful cluster. The manifest's compare-and-set gives you
 at-least-once delivery and fences zombie clients.
 
 The pipelined producer and consumer clients keep many object-storage requests in
-flight at once, and each data batch carries a stable identity across retries so
-sinks can deduplicate. See the [benchmarks](/buffer/benchmarks) for end-to-end
+flight at once to maximize throughput. Each data batch carries a stable identity across retries so
+sinks can deduplicate correctly. See the [benchmarks](/buffer/benchmarks) for end-to-end
 latency, throughput, and a cost comparison against Kafka.
 
 ## Tradeoffs
