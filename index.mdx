@@ -27,22 +27,40 @@ title: Introduction
 ┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛
 `}</pre>
 
-OpenData is a collection of operationaly simple, open source databases that
+OpenData is a collection of operationally simple, open source databases that
 share a unified storage foundation on object storage.
+
+OpenData is self-hosted software, not a hosted data API. You run the relevant
+database binary on your own infrastructure, point it at S3-compatible object
+storage, and call it from your application over HTTP. Buffer is the exception:
+it is an embedded library for building high-throughput ingestion pipelines.
+
+## Use OpenData from applications
+
+- **Vector** is for embeddings, semantic search, and full-text search. Start
+  with the [Vector quickstart](/vector/quickstart) or the
+  [Vector OpenAPI spec](/openapi/vector.yaml).
+- **Timeseries** is for Prometheus-compatible metrics. Start with the
+  [Timeseries quickstart](/timeseries/quickstart) or the
+  [Timeseries OpenAPI spec](/openapi/timeseries.yaml).
+- **Log** is for keyed event streams. Start with the
+  [Log quickstart](/log/quickstart) or the [Log OpenAPI spec](/openapi/log.yaml).
+- **Buffer** is for durable ingestion queues on object storage. Start with the
+  [Buffer docs](/buffer).
 
 Database software is often available for free as open source, but the real cost
 comes from the operational expertise required to keep them running. Operators
 must understand and configure behavior for replication, failover, backup,
 capacity planning, and disaster recovery. These concerns multiply with every
-additional database system since each ship with their own implementations.
+additional database system since each ships with its own implementations.
 
-Is there a better way? We believe that the general avaialbility of Object
-Storage is the escape hatch.  Services like S3 provide durability, replication,
+Is there a better way? We believe that the general availability of object
+storage is the escape hatch. Services like S3 provide durability, replication,
 and availability _at commodity prices_ with no operational overhead. When you
 push replication and durability down to the storage layer, the database itself
 becomes dramatically simpler. Entire categories of complexity disappear:
 
-- **Durability & Availability**: opendata systems can be deployed in production with a
+- **Durability & Availability**: OpenData systems can be deployed in production with a
   single replica and still maintain durability and high write availability.
 - **Failover & Scaling**: worker nodes are stateless and only use local
   disks for caching, making failovers and horizontal scaling trivial.
@@ -71,4 +89,3 @@ operational experience.
     Highly-available ingestion buffer
   </Card>
 </CardGroup>
-

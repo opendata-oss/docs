@@ -2,12 +2,28 @@
 
 ## About this project
 
-This is the documentation site for [OpenData](https://github.com/opendata-oss/opendata), built on [Mintlify](https://mintlify.com). OpenData is a family of databases — Timeseries, Log, and Vector — that share a common storage foundation built on [SlateDB](https://github.com/slatedb/slatedb), an object-store-native LSM tree, plus Buffer, a stateless ingestion buffer on object storage.
+This is the documentation site for [OpenData](https://github.com/opendata-oss/opendata), built on [Mintlify](https://mintlify.com). OpenData is a family of products — Timeseries, Log, Vector, and Buffer — that share a common storage foundation built on [SlateDB](https://github.com/slatedb/slatedb), an object-store-native LSM tree. OpenData is self-hosted open-source software, not a hosted API or SaaS product.
 
 - Pages are MDX files with YAML frontmatter
 - Configuration lives in `docs.json`
 - Run `mint dev` to preview locally
 - Run `mint broken-links` to check links
+
+## Agent and API discovery
+
+Preserve the machine-readable discovery paths exposed by Mintlify:
+
+- `/llms.txt` — generated documentation index
+- `/llms-full.txt` — generated full documentation text
+- `/openapi/timeseries.yaml`, `/openapi/log.yaml`, `/openapi/vector.yaml` — raw OpenAPI 3.1 specs
+
+When documenting installs, prefer deterministic component commands:
+
+```bash
+curl -fsSL https://www.opendata.dev/install.sh | sh -s -- <timeseries|log|vector>
+```
+
+Buffer is an embedded library and should not be documented as a standalone HTTP server install.
 
 ## Source repo structure
 
