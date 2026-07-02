@@ -1,0 +1,88 @@
+---
+title: "When to choose Log"
+description: "How OpenData Log compares to Kafka, WarpStream and the Kafka-on-S3 systems, S2, and NATS JetStream"
+---
+
+*We build OpenData and this is our best good-faith comparison. Corrections
+are [welcome](https://github.com/opendata-oss/opendata/issues).*
+
+Log is built to deliver ordered, replayable events for high cardinality
+entities: a stream per user, session, agent, or device. With Log,
+every key is its own ordered stream and there are no topics or partitions to manage.
+
+## Choose Log if you care about…
+
+**…a stream per user, session, agent, or device, created by just writing to
+it.** There are no topics to declare and no partition counts to size,
+whether you have a thousand streams or a million.
+
+**…reading specific streams.** Per-key
+scans are range reads on an LSM tree, and they stay fast as key cardinality grows.
+In [our benchmarks](/log/benchmarks), going from 100K to 1M keys left
+single-key poll latency flat.
+
+**…serving tens of thousands of live followers cheaply.** One node sustained
+50,000 concurrent followers across 1M keys at 20 MB/s ingest with sub-50ms
+p50, about \$224/month all-in. Each added reader node buys another ~50K
+followers for ~\$174.
+
+**…replay from any point in history with retention at S3 prices.** Any offset in
+any stream is a range read; retention is dropping entire time-based segments.
+
+**…never operating a broker cluster.** All you need to run Log is one binary and an 
+object store bucket. A single node is durable, read replicas pull straight from S3 (and can be scoped to
+key ranges), and splitting a node is a metadata operation: consumers resume
+at the same sequence numbers.
+
+
+## How the alternatives stack up
+
+✓ = yes · ~ = partially · ✗ = no
+
+| You care about… | **Log** | Kafka | WarpStream / AutoMQ | S2 (cloud) | s2-lite | NATS JetStream |
+|---|---|---|---|---|---|---|
+| A stream per entity, zero provisioning | ✓ | ✗ ¹ | ✗ ¹ | ✓ | ✓ | ~ ² |
+| Fast per-key reads at millions of keys | ✓ | ✗ ¹ | ✗ ¹ | ✓ | ~ ³ | ~ ² |
+| Follow thousands of keys cheaply | ✓ | ~ ⁴ | ~ ⁴ | managed | ~ ³ | ✓ |
+| Replayable history at S3 prices | ✓ | ~ ⁵ | ✓ | ✓ | ✓ | ✗ ⁶ |
+| No broker cluster; single node durable | ✓ | ✗ | ~ ⁷ | managed | ✓ | ✗ ⁶ |
+| License | MIT | Apache 2.0 | Proprietary / BSL ⁷ | Proprietary | MIT | Apache 2.0 |
+
+¹ Kafka-protocol systems route by topic-partition: one key's history means
+scanning its partition, and stream-per-entity means an unworkable partition
+count, on disks or on S3. \
+² NATS handles millions of subjects with superb latency, but replayable
+history is bounded by the size of your replicated disks. \
+³ [s2-lite](https://github.com/s2-streamstore/s2) is the nearest open-source
+neighbor to Log: MIT, stream-per-key, also built on SlateDB. It's a young
+single-node companion to [S2's cloud](https://s2.dev), without published
+high-cardinality serving numbers.  \
+⁴ Each follower tailing its own "stream" multiplies the problem in ¹. \
+⁵ [Kafka tiered storage](https://cwiki.apache.org/confluence/display/KAFKA/KIP-405%3A+Kafka+Tiered+Storage)
+parks old segments on S3, but retention and serving remain broker concerns. \
+⁶ [JetStream](https://docs.nats.io/nats-concepts/jetstream) persists to
+RAFT-replicated local disks you manage. \
+⁷ [WarpStream's agents](https://docs.warpstream.com/warpstream/overview/architecture)
+are stateless but require its proprietary hosted control plane;
+[AutoMQ](https://github.com/AutoMQ/automq)'s core is BSL.
+
+The systems that can do per-entity streams are managed services or very
+young. The battle-tested open-source systems are funnels wearing the wrong
+data model for routing. Log is the self-hosted system built for routing.
+
+## The tradeoffs
+
+- **Latency:** durable end-to-end latency is ~2s by default, though tuning can bring it lower. Polls run p50 ~30ms / p99
+  ~300ms at 25 MiB/s, and degrade if ingestion rates thrash the cache.
+- **You track your own offsets:** consumer groups and efficient
+  tail-following are
+  [active roadmap items](https://github.com/opendata-oss/opendata/blob/main/log/README.md);
+  today, store per-key sequence numbers yourself.
+- **One writer node:** write scaling is vertical for now; readers scale
+  horizontally.
+
+---
+
+*Last reviewed July 2026. Please
+[tell us](https://github.com/opendata-oss/opendata/issues) if a claim has
+gone stale.*

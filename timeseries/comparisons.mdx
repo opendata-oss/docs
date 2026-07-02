@@ -1,0 +1,99 @@
+---
+title: "When to choose Timeseries"
+description: "How OpenData Timeseries compares to Prometheus, Thanos, Mimir, VictoriaMetrics, GreptimeDB, and managed observability"
+---
+
+*We build OpenData and this is our best good-faith comparison. Corrections
+[welcome](https://github.com/opendata-oss/opendata/issues).*
+
+Timeseries is the only Prometheus-compatible TSDB where object storage is
+the sole durable layer, so a production deployment is a stateless writer,
+stateless readers, and an object store bucket. Every alternative keeps durable state on
+disks somewhere, and the painful parts of self-hosting metrics at scale
+(managing replicated state with multiple services) follow from that.
+
+## Choose Timeseries if you care about…
+
+**…keeping your Grafana dashboards and Prometheus tooling.** Remote write,
+scraping, PromQL, and OTLP ingest: you repoint your collectors, dashboards,
+and alerts at a new backend instead of adopting a new ecosystem.
+
+**…a metrics bill that's independent of per-sample pricing.**
+[Our benchmark](/timeseries/benchmarks) ran 3.3M active series and 4.7B
+samples/day on a single small writer, about \$560/month of compute for the
+full cluster. The same workload at
+[published rates](https://aws.amazon.com/prometheus/pricing/) is roughly
+\$12,800/month on Amazon Managed Prometheus, because they charge by the number of series. 
+
+**…never losing metrics when a node dies.** Every write is durable in the
+object storage. 
+
+**…a deployment you can hold in your head.** One writer, with N independent readers, and an object store 
+bucket. The processes are decoupled and scaling requires adding or removing pods without worrying about data rebalancing. 
+
+**…high cardinality without building a cluster.** Timeseries can handle millions of active series
+on one 4-vCPU writer, with reads scaled independently by adding reader pods.
+
+
+## How the alternatives stack up
+
+✓ = yes · ~ = partially · ✗ = no
+
+| You care about… | **Timeseries** | Prometheus | Thanos | Mimir | VictoriaMetrics | GreptimeDB | Managed (AMP, Grafana Cloud, …) |
+|---|---|---|---|---|---|---|---|
+| Drop-in for Prometheus dashboards & alerts | ~ ¹ | ✓ | ✓ | ✓ | ~ ² | ✓ | ✓ |
+| Cost = compute + S3, no per-sample pricing | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✗ ³ |
+| Durable with a single replica | ✓ | ✗ | ~ ⁴ | ~ ⁴ | ✗ ⁵ | ✓ | managed |
+| Simple deployment: independent stateless writer and readers | ✓ | ✓ ⁶ | ✗ | ✗ | ~ ⁵ | ~ ⁷ | managed |
+| Scale without migrating data  | ✓ | ✗ | ✗ | ✗ | ✗ | ~ ⁷ | managed |
+| Millions of series without a cluster | ✓ | ✗ | ✗ | ✗ | ✓ | ✓ | n/a |
+| License | MIT | Apache 2.0 | Apache 2.0 | AGPLv3 | Apache 2.0, open core | Apache 2.0, open core | Proprietary |
+
+¹ Full PromQL and Prometheus API compatibility are
+[roadmap items](https://github.com/opendata-oss/opendata/blob/main/timeseries/README.md).
+Test your real dashboards before committing. \
+² VictoriaMetrics implements
+[MetricsQL](https://docs.victoriametrics.com/metricsql/), which deliberately
+deviates from PromQL in places. \
+³ The benchmark workload above: ~\$12,830/mo on AMP at
+[published rates](https://aws.amazon.com/prometheus/pricing/) vs. ~\$560/mo
+of compute self-hosted. \
+⁴ Thanos and Mimir put historical blocks on object storage, but recent data
+lives on stateful sidecar/ingester disks with replication (see
+[Mimir's architecture](https://grafana.com/docs/mimir/latest/references/architecture/)),
+which is where the hash rings, quorums, and rebalancing come from. \
+⁵ Simple and durable until you outgrow one node; cluster mode is stateful,
+and replication is off unless you configure it. \
+⁶ Simple, but it doesn't scale past a single node, which is why the rest of
+this table exists. \
+⁷ [GreptimeDB](https://github.com/GreptimeTeam/greptimedb) is the nearest
+neighbor: object-storage-primary, Rust, native
+PromQL, as part of a broader metrics+logs+traces platform. Its standalone
+binary is simple; cluster mode adds a metadata service and datanode roles.
+Our bet is a narrower metrics-only primitive on the shared OpenData
+operating model.
+
+The fully Prometheus-compatible systems keep durable state on disks you
+manage. The simple systems stop being simple (or durable) at scale. The
+managed services solve the problem with your money. Timeseries checks all
+six and is MIT-licensed.
+
+## The tradeoffs
+
+- **Freshness:** batched object-storage writes add 1–5 seconds before
+  samples are queryable. 
+- **Cold reads** pay S3 round trips. NVMe caches keep weeks of data warm,
+  covering most alerting and dashboard queries. But wide uncached historical
+  scans will feel slower than disk-native systems.
+- **Compatibility gaps:** full PromQL/API coverage, retention policies,
+  downsampling, and recording rules are roadmap items.
+- **One writer:** each Timeseries deployment can have only one writer which must 
+  be scaled vertically. Readers scale horizontally today. As the 
+  [benchmarks](/timeseries/benchmarks) show, this can still sustain significant 
+  ingestion rates on modest hardware.
+
+---
+
+*Last reviewed July 2026. Please
+[tell us](https://github.com/opendata-oss/opendata/issues) if a claim has
+gone stale.*

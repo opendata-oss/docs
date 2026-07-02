@@ -1,0 +1,99 @@
+---
+title: "When to choose Buffer"
+description: "How OpenData Buffer compares to Kafka, WarpStream, Kinesis, SQS, and DIY object-storage staging"
+---
+
+*We build OpenData and this is our best good-faith comparison. Corrections
+are [welcome](https://github.com/opendata-oss/opendata/issues).*
+
+The most common Kafka use case, shipping telemetry into a database or
+warehouse, doesn't need most of what a broker provides. Transactions and
+consumer-group coordination are the hard problems brokers exist to solve,
+and a pipeline with a fixed set of producers and one consumer needs neither.
+Buffer removes the broker entirely: producers flush batches straight to your
+object store bucket, and a fenced consumer reads them in order. There is no broker to run
+or rent. 
+
+## Choose Buffer if you care about…
+
+**…moving data from A to B without operating (or renting) a broker.** The
+data path is your bucket. There is nothing to provision. The whole system 
+is a library plus a manifest file on object storage.
+
+**…data transport at S3 prices.** [Our benchmark](/buffer/benchmarks)
+moved 30 MiB/s for ~\$91/month of object-storage charges. Public calculators
+price the same throughput at roughly \$1,300/month on
+[managed WarpStream](https://www.warpstream.com/pricing) and \$8,500/month
+[self-hosting Kafka](https://2minutestreaming.com/tools/apache-kafka-calculator/).
+
+**…highly available pipelines.** Producers are stateless: if one
+dies, another can take over, with no rebalancing protocol. If the downstream
+database is slow or down, batches accumulate safely in object storage
+instead of back-pressuring your apps or getting dropped. And zonal producers
+mean ingest never crosses AZs, resulting in zero cross-AZ transfer fees.
+
+**…deduplicating data on write.** Buffer maintains unique identities for each batch written
+to a sink that are stable across retries. This makes deduplication on write possible if you need
+those semantics.
+
+**…gigabit-scale throughput.** Pipelined producers and consumers can sustain
+extremely high throughput on modest hardware. We demonstrated
+[~1 Gbps of log ingestion into ClickHouse](https://www.opendata.dev/blog/ingesting-1gbps-logs-to-clickhouse) 
+using just 2 nodes each with 4 vCPUs and 8GB of RAM.
+
+**…observability pipelines specifically.** An included OpenTelemetry exporter ships
+MELT data from any OTel Collector through Buffer. A bundled ClickHouse sink can read from Buffer
+and write to ClickHouse. OpenData Log and Vector can ingest from Buffer natively.
+
+## How the alternatives stack up
+
+✓ = yes · ~ = partially · ✗ = no
+
+| You care about… | **Buffer** | Kafka (self-hosted / MSK) | WarpStream / AutoMQ / Bufstream | Kinesis | SQS | DIY S3 staging |
+|---|---|---|---|---|---|---|
+| No broker or service in the data path | ✓ | ✗ | ~ ¹ | ✗ | ✗ | ✓ |
+| Cost ≈ S3 requests | ✓ ² | ✗ | ~ ² | ✗ | ✗ | ✓ |
+| Stateless producers, zero cross-AZ fees | ✓ | ✗ | ✓ | ~ | ~ | ✓ |
+| Deduplication on write | ✓ | ✓ | ✓ | ✗ | ✗ | ✗ ³ |
+| Multi-Gbps pipeline throughput | ✓ | ✓ | ✓ | ~ ⁴ | ✗ ⁴ | ~ ³ |
+| License | MIT | Apache 2.0 | Proprietary / BSL | Proprietary | Proprietary | n/a |
+
+¹ The Kafka-on-S3 systems remove the broker disks but keep the broker tier:
+you still run [agents](https://docs.warpstream.com/warpstream/overview/architecture),
+and WarpStream's depend on a proprietary hosted control plane. \
+² At 30 MiB/s: ~\$91/mo of S3 charges on Buffer vs. ~\$1,300/mo
+([WarpStream's calculator](https://www.warpstream.com/pricing)) and
+~\$8,500/mo ([2minutestreaming's Kafka calculator](https://2minutestreaming.com/tools/apache-kafka-calculator/)). \
+³ The closest competitor: producers writing files to a prefix and a consumer
+listing them. Same architecture and economics, but you'd have to solve the coordination between producer and consumer, 
+write pipelined clients, etc.\
+⁴ [Kinesis](https://aws.amazon.com/kinesis/data-streams/pricing/) meters and
+throttles per shard, so Gbps means big shard fleets and bills; SQS is
+per-message with size limits. It's built for task queues rather than bulk ordered
+transport.
+
+Everything with Buffer's reliability semantics puts a broker tier in the
+path and charges for it, and the only thing matching its cost is building it
+yourself. If your pipeline has fixed producers and a fixed consumer, which
+describes many telemetry ingestion paths, the broker is pure
+overhead. 
+
+## The tradeoffs
+
+- **Latency is sub-second to seconds:** p50 under 0.5s / p99 ~2s at 30 MiB/s,
+  tunable toward a ~50–100ms floor at higher request cost. Millisecond
+  delivery needs a broker.
+- **Participants are finite:** throughput contends on one compare-and-set
+  manifest, so run one producer per zone and a small fixed consumer set.
+- **Rust only:** Buffer is a crate. The OTel exporter covers the most common
+  producer without writing Rust, but there are no Java/Python/Go clients
+  yet. This is the biggest practical limitation.
+- **At-least-once, per-producer ordering:** global total order and
+  transactional produce are non-goals. Exactly-once is an effect of
+  deterministic replay plus an idempotent sink.
+
+---
+
+*Last reviewed July 2026. Please
+[tell us](https://github.com/opendata-oss/opendata/issues) if a claim has
+gone stale.*
