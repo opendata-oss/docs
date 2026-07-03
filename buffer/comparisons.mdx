@@ -11,14 +11,13 @@ warehouse, doesn't need most of what a broker provides. Transactions and
 consumer-group coordination are the hard problems brokers exist to solve,
 and a pipeline with a fixed set of producers and one consumer needs neither.
 Buffer removes the broker entirely: producers flush batches straight to your
-object store bucket, and a fenced consumer reads them in order. There is no broker to run
-or rent. 
+object store bucket, and a fenced consumer reads them in order.
 
 ## Choose Buffer if you care about…
 
-**…moving data from A to B without operating (or renting) a broker.** The
-data path is your bucket. There is nothing to provision. The whole system 
-is a library plus a manifest file on object storage.
+**…moving data without operating a broker.** The data path is your bucket:
+the whole system is a library plus a manifest file on object storage. There
+is no service to provision or operate.
 
 **…data transport at S3 prices.** [Our benchmark](/buffer/benchmarks)
 moved 30 MiB/s for ~\$91/month of object-storage charges. Public calculators
@@ -36,10 +35,10 @@ mean ingest never crosses AZs, resulting in zero cross-AZ transfer fees.
 to a sink that are stable across retries. This makes deduplication on write possible if you need
 those semantics.
 
-**…gigabit-scale throughput.** Pipelined producers and consumers can sustain
-extremely high throughput on modest hardware. We demonstrated
-[~1 Gbps of log ingestion into ClickHouse](https://www.opendata.dev/blog/ingesting-1gbps-logs-to-clickhouse) 
-using just 2 nodes each with 4 vCPUs and 8GB of RAM.
+**…gigabit-scale throughput.** Pipelined producers and consumers keep many
+object-store requests in flight at once. We demonstrated
+[~1 Gbps of log ingestion into ClickHouse](https://www.opendata.dev/blog/ingesting-1gbps-logs-to-clickhouse)
+with two nodes, each with 4 vCPUs and 8 GB of RAM.
 
 **…observability pipelines specifically.** An included OpenTelemetry exporter ships
 MELT data from any OTel Collector through Buffer. A bundled ClickHouse sink can read from Buffer
@@ -72,11 +71,11 @@ throttles per shard, so Gbps means big shard fleets and bills; SQS is
 per-message with size limits. It's built for task queues rather than bulk ordered
 transport.
 
-Everything with Buffer's reliability semantics puts a broker tier in the
-path and charges for it, and the only thing matching its cost is building it
+The systems with Buffer's reliability semantics all put a broker tier in
+the path; the only alternative at similar cost is building the coordination
 yourself. If your pipeline has fixed producers and a fixed consumer, which
-describes many telemetry ingestion paths, the broker is pure
-overhead. 
+describes many telemetry ingestion paths, the broker isn't doing necessary
+work.
 
 ## The tradeoffs
 

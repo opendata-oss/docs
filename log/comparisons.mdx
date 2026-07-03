@@ -21,15 +21,15 @@ scans are range reads on an LSM tree, and they stay fast as key cardinality grow
 In [our benchmarks](/log/benchmarks), going from 100K to 1M keys left
 single-key poll latency flat.
 
-**…serving tens of thousands of live followers cheaply.** One node sustained
+**…serving tens of thousands of concurrent followers.** One node sustained
 50,000 concurrent followers across 1M keys at 20 MB/s ingest with sub-50ms
-p50, about \$224/month all-in. Each added reader node buys another ~50K
-followers for ~\$174.
+p50, about \$224/month all-in. Each added reader node serves another ~50K
+followers for ~\$174/month.
 
 **…replay from any point in history with retention at S3 prices.** Any offset in
 any stream is a range read; retention is dropping entire time-based segments.
 
-**…never operating a broker cluster.** All you need to run Log is one binary and an 
+**…never operating a broker cluster.** Log runs as one binary with an
 object store bucket. A single node is durable, read replicas pull straight from S3 (and can be scoped to
 key ranges), and splitting a node is a metadata operation: consumers resume
 at the same sequence numbers.
@@ -51,7 +51,7 @@ at the same sequence numbers.
 ¹ Kafka-protocol systems route by topic-partition: one key's history means
 scanning its partition, and stream-per-entity means an unworkable partition
 count, on disks or on S3. \
-² NATS handles millions of subjects with superb latency, but replayable
+² NATS handles millions of subjects at low latency, but replayable
 history is bounded by the size of your replicated disks. \
 ³ [s2-lite](https://github.com/s2-streamstore/s2) is the nearest open-source
 neighbor to Log: MIT, stream-per-key, also built on SlateDB. It's a young
@@ -67,7 +67,7 @@ are stateless but require its proprietary hosted control plane;
 [AutoMQ](https://github.com/AutoMQ/automq)'s core is BSL.
 
 The systems that can do per-entity streams are managed services or very
-young. The battle-tested open-source systems are funnels wearing the wrong
+young. The mature open-source systems are funnels with the wrong
 data model for routing. Log is the self-hosted system built for routing.
 
 ## The tradeoffs

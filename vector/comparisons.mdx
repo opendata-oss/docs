@@ -14,30 +14,30 @@ own account.
 
 ## Choose Vector if you care about…
 
-**…a bill sized by your hot data rather than your whole dataset.** Cold
+**…paying proportional to your hot data, not your full dataset.** Cold
 vectors sit on S3 at
 [~\$0.02/GB-month](https://aws.amazon.com/s3/pricing/), and compute is sized
 for what's actually being queried. In
 [our benchmarks](/vector/benchmarks), one \$346/mo node serves 100M vectors.
 If most of
 your vectors are cold most of the time (per-tenant and per-user indexes are
-the classic case), this is the difference between hundreds and many
-thousands per month.
+the classic case), the difference is hundreds versus thousands of dollars
+per month.
 
 **…a durable deployment that's one process and a bucket.** Every byte of
 data and metadata lives in an object store bucket, so there is no
 replication to manage and you can kill every compute node without losing
-anything. Unlike traditional vector databases, Vector needs no fleet of
-services: scaling reads means adding stateless replica pods that never talk
-to the writer or each other.
+anything. There are no supporting services to run: scaling reads means
+adding stateless replica pods that don't communicate with the writer or
+each other.
 
-**…a real online database.** Concurrent clients upsert and query a single
+**…an online database.** Concurrent clients upsert and query a single
 incrementally maintained index, rather than a serving layer you assemble
 yourself around a file format.
 
-**…owning your search infrastructure.** MIT licensed in your bucket and your VPC. You pay no 
-per-query bill, your data never leaves your account, and nothing
-can be repriced or acquired out from under you.
+**…owning your search infrastructure.** MIT licensed, running in your
+bucket and your VPC. There is no per-query pricing, data doesn't leave your
+account, and no vendor can reprice or discontinue the software.
 
 
 ## How the alternatives stack up
@@ -46,7 +46,7 @@ can be repriced or acquired out from under you.
 
 | You care about… | **Vector** | turbopuffer | Pinecone | Qdrant / Weaviate | Milvus | Chroma (distributed) | LanceDB (OSS) | pgvector |
 |---|---|---|---|---|---|---|---|---|
-| Bill tracks hot data  | ✓ | ✓ | ~ ¹ | ✗ | ~ ² | ✓ | ✓ | ✗ |
+| Cost proportional to hot data | ✓ | ✓ | ~ ¹ | ✗ | ~ ² | ✓ | ✓ | ✗ |
 | Durable deployment: one process + a bucket | ✓ | managed | managed | ✗ | ~ ² | ~ ³ | ~ ⁴ | ✗ |
 | Online database, consistent writes | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✗ ⁴ | ✓ |
 | License | MIT | Proprietary | Proprietary | Apache 2.0 / BSD ⁵ | Apache 2.0 ² | Apache 2.0 ³ | Apache 2.0 | PostgreSQL ⁵ |
@@ -69,9 +69,9 @@ storage for pipelines, but the online serving layer is its commercial cloud. \
 ⁵ Open source, but durable state lives on replicated node disks: self-hosting
 means operating a stateful cluster, and cold data pays SSD prices.
 
-turbopuffer checks every box except open source. The open-source systems
-each miss either the stateless operations or the online database. Vector
-checks every box and is MIT-licensed.
+turbopuffer matches Vector on everything except the license. The
+open-source systems each lack either the stateless operations or the online
+database. Vector is the MIT-licensed system with both.
 
 ## The tradeoffs
 

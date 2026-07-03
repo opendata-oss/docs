@@ -18,7 +18,7 @@ disks somewhere, and the painful parts of self-hosting metrics at scale
 scraping, PromQL, and OTLP ingest: you repoint your collectors, dashboards,
 and alerts at a new backend instead of adopting a new ecosystem.
 
-**…a metrics bill that's independent of per-sample pricing.**
+**…paying for compute and storage, not per-sample pricing.**
 [Our benchmark](/timeseries/benchmarks) ran 3.3M active series and 4.7B
 samples/day on a single small writer, about \$560/month of compute for the
 full cluster. The same workload at
@@ -28,8 +28,10 @@ full cluster. The same workload at
 **…never losing metrics when a node dies.** Every write is durable in the
 object storage. 
 
-**…a deployment you can hold in your head.** One writer, with N independent readers, and an object store 
-bucket. The processes are decoupled and scaling requires adding or removing pods without worrying about data rebalancing. 
+**…a simple deployment.** A Timeseries deployment is one writer, N
+independent readers, and an object store bucket. The processes are
+decoupled, and scaling means adding or removing pods; no data rebalancing
+is involved.
 
 **…high cardinality without building a cluster.** Timeseries can handle millions of active series
 on one 4-vCPU writer, with reads scaled independently by adding reader pods.
@@ -64,8 +66,7 @@ lives on stateful sidecar/ingester disks with replication (see
 which is where the hash rings, quorums, and rebalancing come from. \
 ⁵ Simple and durable until you outgrow one node; cluster mode is stateful,
 and replication is off unless you configure it. \
-⁶ Simple, but it doesn't scale past a single node, which is why the rest of
-this table exists. \
+⁶ Simple, but it doesn't scale past a single node. \
 ⁷ [GreptimeDB](https://github.com/GreptimeTeam/greptimedb) is the nearest
 neighbor: object-storage-primary, Rust, native
 PromQL, as part of a broader metrics+logs+traces platform. Its standalone
@@ -75,8 +76,8 @@ operating model.
 
 The fully Prometheus-compatible systems keep durable state on disks you
 manage. The simple systems stop being simple (or durable) at scale. The
-managed services solve the problem with your money. Timeseries checks all
-six and is MIT-licensed.
+managed services trade the operational problem for per-sample pricing.
+Timeseries covers all six rows and is MIT-licensed.
 
 ## The tradeoffs
 
@@ -88,9 +89,9 @@ six and is MIT-licensed.
 - **Compatibility gaps:** full PromQL/API coverage, retention policies,
   downsampling, and recording rules are roadmap items.
 - **One writer:** each Timeseries deployment can have only one writer which must 
-  be scaled vertically. Readers scale horizontally today. As the 
-  [benchmarks](/timeseries/benchmarks) show, this can still sustain significant 
-  ingestion rates on modest hardware.
+  be scaled vertically. Readers scale horizontally today. The
+  [benchmarks](/timeseries/benchmarks) show a single 4-vCPU writer
+  sustaining 3.3M active series and 4.7B samples/day.
 
 ---
 
