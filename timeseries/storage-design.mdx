@@ -60,14 +60,13 @@ through compaction, replacing the original fine-grained buckets.
 
 ## Record types
 
-All records share a common key prefix that encodes a version byte and a
-record tag. The record tag identifies the record type and, for bucket-scoped
-records, the time granularity. This allows different record types and bucket
+All records share a common key prefix that encodes a version byte, a
+record type, and a time bucket. The time bucket consists of the start
+ time of the bucket and its size. This allows different record types and bucket
 sizes to coexist in the same keyspace while maintaining clean sort ordering.
 
 | Record type | Scope | Description |
 | --- | --- | --- |
-| **BucketList** | Global | Enumerates the time buckets that contain data, including each bucket's granularity |
 | **SeriesDictionary** | Bucket | Maps label-set fingerprints to series IDs, used during ingestion to assign or look up IDs |
 | **ForwardIndex** | Bucket | Stores the full label set for each series ID, used during query execution to resolve labels |
 | **InvertedIndex** | Bucket | Maps each label/value pair to a [RoaringBitmap](https://roaringbitmap.org/) of series IDs (the posting list) |
