@@ -269,7 +269,8 @@ cache_warmer:
 ```
 
 Match `warm_range` to the time range your dashboards and alerts query most.
-Warming more than the caches can hold evicts the oldest warmed blocks first.
+A warm window that exceeds cache capacity wastes work: some warmed blocks
+are evicted again before a query ever reads them.
 
 ### `<buffer_consumer_config>`
 
