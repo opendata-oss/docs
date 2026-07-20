@@ -44,7 +44,7 @@ these files under `charts/opendata-timeseries/`.
 ```yaml values.yaml
 image:
   repository: ghcr.io/opendata-oss/timeseries
-  tag: "0.3.0"
+  tag: "0.4.0"
 
 port: 9090
 
@@ -284,11 +284,12 @@ from S3. For production workloads, use an SSD-backed StorageClass:
   issues many small random reads, and spinning disks will bottleneck performance.
 </Warning>
 
-### Block cache
+### Block and metadata caches
 
-On top of SlateDB's disk cache, Timeseries can keep decoded blocks in a
-hybrid memory-plus-disk block cache backed by [foyer](https://foyer.rs). Add
-it under `storage` in `prometheus.yaml`:
+On top of SlateDB's disk cache, Timeseries keeps SST blocks in two
+[foyer](https://foyer.rs)-backed caches: `block_cache` holds decoded data
+blocks, and `meta_cache` holds SST filters and indexes. Configure both under
+`storage` in `prometheus.yaml`:
 
 ```yaml prometheus.yaml
 storage:
@@ -305,27 +306,47 @@ storage:
     disk_path: /cache/foyer
     write_policy: WriteOnInsertion
     flushers: 4
+  meta_cache:
+    type: FoyerMemory
+    capacity: 4294967296           # 4 GiB
 ```
+
+<Warning>
+  Do not configure `block_cache` without `meta_cache`. Filters and indexes are
+  consulted on every read; if they are uncached, each read fetches them from
+  S3 again and query latency grows with SST count. In our testing, a query
+  that resolves in ~300ms with both caches took over three minutes with
+  `block_cache` alone.
+</Warning>
 
 Sizing guidance:
 
-- Set `memory_capacity` to roughly the recent working set (the last few hours
-  of bucket index and sample data).
+- Set the block cache's `memory_capacity` to roughly the recent working set
+  (the last few hours of sample data).
 - Point `disk_path` at the same SSD-backed PVC used by the disk cache; the
   two workloads coexist.
 - Keep `write_policy: WriteOnInsertion` so every cached block is also on disk.
   Restarts then hit the disk tier instead of re-reading from S3.
+- Size `meta_cache` to hold the full live filter and index set so it never
+  evicts. Metadata blocks are small relative to data: 4 GiB covers most
+  deployments. An in-memory cache is enough because the
+  [cache warmer](#cache-warmer) rebuilds it on restart.
 - Raise `flushers` if the `foyer_*` write-queue metrics show backpressure.
 
-See [`<block_cache_config>`](/timeseries/configuration#block_cache_config) for
-the full field reference.
+See [`<cache_config>`](/timeseries/configuration#cache_config) for the full
+field reference.
 
 ### Cache warmer
 
-On startup the server scans recent time bucket key ranges through the storage
-reader, which populates the block cache. Queries that hit in the first few
-seconds after a restart avoid a cold-cache penalty. This is on by default and
-covers the last 24 hours including sample data. To tune or disable it, see
+On startup the warmer discovers the time buckets in the warm window (default:
+the last 24 hours) and drives SlateDB's cache manager over the SSTs backing
+them, loading filters and indexes into `meta_cache` and sample data blocks
+into `block_cache`. Queries after a restart run against warm caches instead
+of paying object-store round trips — including on a fresh node, since the
+warmer reads from S3, not from any local state.
+
+The warmer is on by default and runs once at startup. To tune the window or
+disable it, see
 [`<cache_warmer_config>`](/timeseries/configuration#cache_warmer_config).
 
 ### Durable OTLP ingest

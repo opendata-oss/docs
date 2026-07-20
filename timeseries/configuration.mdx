@@ -120,8 +120,12 @@ type: <string> # One of: InMemory, SlateDb
       # in the working directory and merges any SLATEDB_-prefixed environment variables.
       [ settings_path: <string> ]
 
-      # Block cache (optional). See <block_cache_config> below.
-      [ block_cache: <block_cache_config> ]
+      # Cache for SST data blocks (optional). See <cache_config> below.
+      [ block_cache: <cache_config> ]
+
+      # Cache for SST metadata: filters, indexes, and stats blocks.
+      # Set this whenever block_cache is set. See <cache_config> below.
+      [ meta_cache: <cache_config> ]
 
       # Object store provider configuration (required).
       object_store:
@@ -130,43 +134,84 @@ type: <string> # One of: InMemory, SlateDb
   </Tab>
 </Tabs>
 
-### `<block_cache_config>`
+### `<cache_config>`
 
-The block cache sits in front of SlateDB and holds decoded SST blocks. It is
-tagged by `type`. Only `FoyerHybrid` is currently available.
+The same cache configuration is used for two slots: `block_cache` holds
+decoded SST data blocks, and `meta_cache` holds SST metadata — filters,
+indexes, and stats blocks. When either is set, SlateDB routes data blocks to
+`block_cache` and metadata blocks to `meta_cache`. A slot left unset caches
+nothing for that class of block.
 
-```yaml
-block_cache:
-  type: FoyerHybrid
+<Warning>
+  Setting `block_cache` without `meta_cache` leaves filters and indexes
+  uncached, so every read fetches them from the object store again. Because
+  each read consults the filter of every SST that might hold the key, query
+  latency then grows with SST count. Always pair `block_cache` with a
+  `meta_cache`.
+</Warning>
 
-  # In-memory tier capacity in bytes.
-  memory_capacity: <int>
+A cache is tagged by `type`: `FoyerHybrid` (memory + disk tiers) or
+`FoyerMemory` (memory only), both backed by [foyer](https://foyer.rs).
 
-  # On-disk tier capacity in bytes.
-  disk_capacity: <int>
+<Tabs>
+  <Tab title="FoyerHybrid">
+    Two tiers: in-memory plus on-disk (ideally NVMe). Suited to the
+    `block_cache` slot, where capacity matters more than the last few
+    microseconds of latency.
 
-  # Directory for the on-disk tier.
-  disk_path: <string>
+    ```yaml
+    block_cache:
+      type: FoyerHybrid
 
-  # When entries are promoted to the disk tier.
-  # WriteOnInsertion persists every cached block; WriteOnEviction
-  # only persists on memory eviction.
-  [ write_policy: <string> | default = WriteOnInsertion ]
+      # In-memory tier capacity in bytes.
+      memory_capacity: <int>
 
-  # Flush thread count for the disk engine.
-  [ flushers: <int> | default = 4 ]
+      # On-disk tier capacity in bytes.
+      disk_capacity: <int>
 
-  # Flush-pipeline buffer pool size in bytes. Actual allocation is ~2x
-  # this value (flushers double-buffer). Defaults to memory_capacity / 32.
-  [ buffer_pool_size: <int> ]
+      # Directory for the on-disk tier.
+      disk_path: <string>
 
-  # Write-queue size threshold in bytes. Entries beyond this are dropped
-  # rather than blocking the cache.
-  [ submit_queue_size_threshold: <int> | default = 1073741824 ]
-```
+      # When entries are promoted to the disk tier.
+      # WriteOnInsertion persists every cached block; WriteOnEviction
+      # only persists on memory eviction.
+      [ write_policy: <string> | default = WriteOnInsertion ]
 
-See the [production guide](/timeseries/production#block-cache) for recommended
-sizes.
+      # Flush thread count for the disk engine.
+      [ flushers: <int> | default = 4 ]
+
+      # Flush-pipeline buffer pool size in bytes. Actual allocation is ~2x
+      # this value (flushers double-buffer). Defaults to memory_capacity / 32.
+      [ buffer_pool_size: <int> ]
+
+      # Write-queue size threshold in bytes. Entries beyond this are dropped
+      # rather than blocking the cache.
+      [ submit_queue_size_threshold: <int> | default = 1073741824 ]
+    ```
+  </Tab>
+  <Tab title="FoyerMemory">
+    A single in-memory tier. Suited to the `meta_cache` slot: metadata blocks
+    are small but consulted on every read, so they belong in memory, and the
+    [cache warmer](#cache_warmer_config) rebuilds the cache cheaply after a
+    restart. Size it to hold the full live filter and index set so it never
+    evicts.
+
+    ```yaml
+    meta_cache:
+      type: FoyerMemory
+
+      # Cache capacity in bytes.
+      capacity: <int>
+
+      # Number of shards. When absent, foyer derives a default from the
+      # available CPU count.
+      [ shards: <int> ]
+    ```
+  </Tab>
+</Tabs>
+
+See the [production guide](/timeseries/production#block-and-metadata-caches)
+for recommended sizes.
 
 ### `<object_store_config>`
 
@@ -201,24 +246,30 @@ The object store is tagged by `type`.
 
 ### `<cache_warmer_config>`
 
-On startup, the server scans recent time bucket key ranges through the storage
-reader. The block cache picks up those blocks as a side effect, so the first
-queries after a restart do not pay cold-cache latency. The warmer runs once
-and exits.
+On startup, the warmer discovers the time buckets that overlap the warm window
+and hands the SSTs backing them to SlateDB's cache manager, which loads each
+SST's filters and index — and, when `include_samples` is set, its sample data
+blocks — directly into the configured caches. Filters and indexes land in
+`meta_cache`, data blocks in `block_cache`. The first queries after a restart
+then run against warm caches instead of paying object-store round trips.
+
+The warmer runs once and exits. It is a no-op when neither cache is
+configured. Pairing it with an in-memory `meta_cache` works well: the cache
+loses its contents on restart, and the warmer rebuilds them in seconds.
 
 Enabled by default. Set `cache_warmer: null` to disable.
 
 ```yaml
 cache_warmer:
-  # How far back to scan on startup.
+  # How far back to warm on startup.
   [ warm_range: <duration> | default = 24h ]
 
-  # Whether to warm raw sample data in addition to index metadata.
+  # Whether to warm sample data blocks in addition to filters and indexes.
   [ include_samples: <bool> | default = true ]
 ```
 
-Disable the warmer when starting read-only replicas that only serve recent
-queries, where the up-front scan cost outweighs the benefit.
+Match `warm_range` to the time range your dashboards and alerts query most.
+Warming more than the caches can hold evicts the oldest warmed blocks first.
 
 ### `<buffer_consumer_config>`
 
