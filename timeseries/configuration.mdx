@@ -136,11 +136,11 @@ type: <string> # One of: InMemory, SlateDb
 
 ### `<cache_config>`
 
-The same cache configuration is used for two slots: `block_cache` holds
-decoded SST data blocks, and `meta_cache` holds SST metadata — filters,
-indexes, and stats blocks. When either is set, SlateDB routes data blocks to
-`block_cache` and metadata blocks to `meta_cache`. A slot left unset caches
-nothing for that class of block.
+Two slots share this cache configuration: `block_cache` holds decoded SST
+data blocks, and `meta_cache` holds SST metadata (filters, indexes, and stats
+blocks). When either is set, SlateDB routes data blocks to `block_cache` and
+metadata blocks to `meta_cache`. A slot left unset caches nothing for that
+class of block.
 
 <Warning>
   Setting `block_cache` without `meta_cache` leaves filters and indexes
@@ -191,7 +191,7 @@ A cache is tagged by `type`: `FoyerHybrid` (memory + disk tiers) or
   </Tab>
   <Tab title="FoyerMemory">
     A single in-memory tier. Suited to the `meta_cache` slot: metadata blocks
-    are small but consulted on every read, so they belong in memory, and the
+    are small and every read consults them, so they belong in memory, and the
     [cache warmer](#cache_warmer_config) rebuilds the cache cheaply after a
     restart. Size it to hold the full live filter and index set so it never
     evicts.
@@ -248,8 +248,8 @@ The object store is tagged by `type`.
 
 On startup, the warmer discovers the time buckets that overlap the warm window
 and hands the SSTs backing them to SlateDB's cache manager, which loads each
-SST's filters and index — and, when `include_samples` is set, its sample data
-blocks — directly into the configured caches. Filters and indexes land in
+SST's filters and index (plus its sample data blocks when `include_samples` is
+set) directly into the configured caches. Filters and indexes land in
 `meta_cache`, data blocks in `block_cache`. The first queries after a restart
 then run against warm caches instead of paying object-store round trips.
 
@@ -269,8 +269,8 @@ cache_warmer:
 ```
 
 Match `warm_range` to the time range your dashboards and alerts query most.
-A warm window that exceeds cache capacity wastes work: some warmed blocks
-are evicted again before a query ever reads them.
+A warm window that exceeds cache capacity wastes work: the cache evicts some
+warmed blocks before a query ever reads them.
 
 ### `<buffer_consumer_config>`
 
