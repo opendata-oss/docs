@@ -33,23 +33,33 @@ those paired with a durable upstream log like
 
 ## Query latency
 
-Query latency depends mostly on how much data a query touches and whether that
-data is already in the SlateDB block cache. The chart below plots cold and warm
-query latency as a function of the number of series matched and scanned over a
-6-hour time range.
+We measured query latency by replaying 18  queries from a production
+Grafana instance over a 6-hour range at 15-second resolution, against a single
+`i4i.xlarge` reader (4 vCPU, 32 GB RAM, NVMe disk cache) running v0.4.0. The
+chart groups queries by the number of series they match and plots the median
+latency per group.
 
-<Frame caption="Cold vs. warm query latency by number of series scanned over a 6-hour range.">
-  <img src="/timeseries/images/query-latency-bar-chart.png" alt="Bar chart comparing cold and warm query latency across increasing series counts" />
+<Frame caption="Query latency by number of series scanned over a 6-hour range: first query after a restart vs. fully warm.">
+  <img src="/timeseries/images/query-latency-bar-chart.png" alt="Bar chart showing query latency rising with series count, with first-query-after-restart and warm latency nearly equal" />
 </Frame>
 
-Warm numbers are the ones that matter for day-to-day use: alerts and active
-dashboards keep their data warm, and once recent data is in the block cache,
-queries stop paying object-store round trips. On the benchmark `r5d.xlarge`
-node, roughly 8 GB of RAM plus ~140 GB of NVMe-backed disk cache keep several
-weeks of data warm (assuming 1–2 bytes per sample for Gorilla-compressed
-blocks).
+Warm latency scales with how many series a query touches: about 200 ms for a
+single-series query, about 730 ms at 112 series. Once recent data is in the
+block cache, queries stop paying object-store round trips. On the benchmark
+node, 8 GB of in-memory block cache plus 700 GB of NVMe-backed disk cache keep
+several weeks of data warm (assuming 1–2 bytes per sample for
+Gorilla-compressed blocks).
 
-Cold reads pay the object-store round trip (10–100 ms). 
+OpenData Timeseries v0.4.0 added a
+[startup cache warmer](/timeseries/configuration#cache_warmer_config) that
+prefetches the index structures and samples for recent data before the node
+begins serving; on the benchmark node it warmed 24 hours of data in under 30
+seconds. You can configure k8s probes to only mark a node
+healthy once the cache is warmed. Practically, when combined with [segmented compaction](https://slatedb.io/blog/segment-oriented-compaction/) in SlateDB, you can ensure that most of your queries
+ are warm even during scale-in and scale-out operations. 
+
+Reads outside the warmed window pay the object-store round trip (10–100 ms
+per read).
 
 ## Cost
 
